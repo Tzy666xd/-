@@ -1,0 +1,6 @@
+shell/.build/
+web/gen/
+dist/
+shots/
+.DS_Store
+*.log

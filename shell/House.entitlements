@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mac App Store 要求 App Sandbox。这个 App 不联网、不读写用户文件、不加载远程内容，
+     所以沙盒只需要开起来，不需要任何 additional entitlement。
+     本地 ad-hoc 构建也带同一份，保证"本机能跑"和"能上架"走的是同一条路径。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.network.client</key><false/>
+  <key>com.apple.security.network.server</key><false/>
+  <key>com.apple.security.device.audio-input</key><false/>
+  <key>com.apple.security.files.user-selected.read-only</key><false/>
+</dict>
+</plist>

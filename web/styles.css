@@ -1,0 +1,1380 @@
+/* 几尼 · 古典英伦私人牌局
+   视觉约束：不用外部素材、不用 backdrop-filter（WKWebView 背后是纯色窗口，糊不出桌面）。
+   质感全靠材质层本身：木、绿呢、象牙、黄铜，加常驻的烛光晕影与纸纹颗粒。
+   动画约束：不用街机式暴力震屏，改成"烛光一晃 + 牌桌一沉 + 机械数字滚轴"，衔接优先。 */
+
+:root {
+  --wood-1: #3a2317;
+  --wood-2: #55341f;
+  --wood-3: #24150d;
+  --felt-1: #1a4529;
+  --felt-2: #0f2e1b;
+  --felt-3: #245c36;
+  --ivory: #f4ead4;
+  --ivory-2: #e3d4b4;
+  --ink: #241a11;
+  --ink-soft: #5b4a35;
+  --brass: #c9a44c;
+  --brass-hi: #f6e3ae;
+  --brass-lo: #7d5f1c;
+  --oxblood: #8c2030;
+  --ink-blue: #26456e;
+  --gold-leaf: #e8c76b;
+
+  /* 缓动要分角色，全场一根曲线就是"生硬"的来源 */
+  --ease: cubic-bezier(.22, .61, .28, 1);
+  --ease-out: cubic-bezier(.16, .84, .28, 1);
+  --ease-enter: cubic-bezier(.12, .74, .2, 1);      /* 进场：冲得快、收得软 */
+  --ease-leave: cubic-bezier(.55, .06, .68, .19);   /* 离场：越滚越快，别减速 */
+  --ease-settle: cubic-bezier(.28, 1.42, .36, 1);   /* 落点：轻微过冲再回稳 */
+  --ease-bow: cubic-bezier(.2, .9, .25, 1);         /* 致意：起势快、回落慢 */
+  --t-slow: .62s;
+  --t-mid: .40s;
+  --t-fast: .22s;
+
+  --card-w: 101px;
+  --card-h: 142px;
+  --serif: "Baskerville", "Baskerville Old Face", "Palatino", Garamond, "Times New Roman", serif;
+  --display: "Didot", "Bodoni 72", "Baskerville", "Times New Roman", serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: #0c0805;
+  color: var(--ivory);
+  font-family: var(--serif);
+  -webkit-font-smoothing: antialiased;
+  user-select: none; -webkit-user-select: none;
+  cursor: default;
+}
+
+/* ── 舞台与常驻氛围层 ─────────────────────────────────────── */
+#stage {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255, 216, 150, .12), transparent 55%),
+    linear-gradient(180deg, #171008 0%, #1d1409 34%, #14100a 100%);
+}
+
+#light {
+  position: absolute; inset: 0; pointer-events: none; z-index: 60;
+  /* 烛光：顶部一团暖光 + 四周压暗的管状晕影 */
+  background:
+    radial-gradient(58% 42% at 50% 6%, rgba(255, 208, 132, .17), transparent 70%),
+    radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(6, 4, 2, .52) 100%);
+  animation: breathe 8.5s ease-in-out infinite;
+}
+#light::after {
+  /* 纸纹颗粒：一张内联 SVG 噪声，够用且不引外部素材 */
+  content: ''; position: absolute; inset: 0; opacity: .17; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+}
+@keyframes breathe {
+  0%, 100% { opacity: .96; }
+  46% { opacity: 1; }
+  62% { opacity: .93; }
+}
+#light.flare { animation: flare .85s var(--ease), breathe 8.5s ease-in-out infinite; }
+@keyframes flare {
+  0% { filter: brightness(1); transform: scale(1); }
+  22% { filter: brightness(1.55); transform: scale(1.012); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+/* ── 顶部木牌 ─────────────────────────────────────────────── */
+#marquee {
+  position: relative; z-index: 10; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 10px 20px 12px;
+  background:
+    repeating-linear-gradient(94deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 6px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .03) 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, var(--wood-2), var(--wood-1) 60%, var(--wood-3));
+  border-bottom: 2px solid rgba(0, 0, 0, .55);
+  box-shadow: 0 3px 0 rgba(255, 226, 170, .09) inset, 0 10px 26px rgba(0, 0, 0, .5);
+}
+#marquee::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--brass) 12%, var(--brass-hi) 50%, var(--brass) 88%, transparent);
+  opacity: .55;
+}
+
+.marq-left { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
+.night {
+  font-family: var(--display); font-size: 25px; letter-spacing: .10em; color: var(--gold-leaf);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .6), 0 0 14px rgba(232, 199, 107, .18);
+  white-space: nowrap;
+}
+.stake { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.stake b {
+  font-size: 15px; letter-spacing: .22em; color: var(--ivory);
+  padding: 2px 10px; border: 1px solid rgba(201, 164, 76, .5); border-radius: 2px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .07), transparent);
+  white-space: nowrap;
+}
+.stake b.boss { color: #ffd9c0; border-color: rgba(178, 62, 52, .8); background: linear-gradient(180deg, rgba(140, 32, 48, .55), rgba(70, 14, 22, .5)); }
+.stake em { font-size: 12.5px; color: #d9c39a; font-style: italic; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.marq-right { display: flex; align-items: center; gap: 12px; }
+.target { text-align: right; line-height: 1.15; }
+.target .lbl { display: block; font-size: 9.5px; letter-spacing: .30em; color: #bda478; }
+.target .num {
+  font-family: var(--display); font-size: 26px; color: #ffe9b8; letter-spacing: .02em;
+  text-shadow: 0 0 16px rgba(255, 205, 120, .28);
+}
+
+/* ── 黄铜构件 ─────────────────────────────────────────────── */
+.crest {
+  width: 26px; height: 26px; flex: 0 0 auto; border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, var(--brass-hi), var(--brass) 46%, var(--brass-lo) 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), inset 0 -2px 4px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .5);
+  position: relative;
+}
+.crest::after {
+  content: '♠'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 13px; color: rgba(40, 24, 6, .78);
+}
+.crest.big { width: 52px; height: 52px; margin: 0 auto 12px; }
+.crest.big::after { font-size: 26px; }
+
+.brass-btn {
+  font-family: var(--serif); font-size: 12.5px; letter-spacing: .18em;
+  color: #2c1c08; padding: 6px 14px; border-radius: 3px; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, .45);
+  background: linear-gradient(180deg, var(--brass-hi), var(--brass) 42%, #a8801f 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset, 0 -1px 0 rgba(0, 0, 0, .25) inset, 0 3px 8px rgba(0, 0, 0, .45);
+  transition: transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.brass-btn:hover { filter: brightness(1.09); transform: translateY(-1px); }
+.brass-btn:active { transform: translateY(1px); box-shadow: 0 1px 3px rgba(0, 0, 0, .5) inset; }
+.brass-btn:disabled { filter: grayscale(.6) brightness(.7); cursor: not-allowed; transform: none; }
+.brass-btn.icon { padding: 6px 9px; letter-spacing: 0; }
+.brass-btn.big { font-size: 17px; padding: 11px 34px; letter-spacing: .3em; }
+.brass-btn.ghost {
+  color: var(--ivory); background: linear-gradient(180deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, .02));
+  border-color: rgba(201, 164, 76, .45); box-shadow: none;
+}
+
+/* ── 座上宾 ───────────────────────────────────────────────── */
+#patrons {
+  position: relative; z-index: 9; flex: 0 0 auto;
+  display: flex; gap: 11px; justify-content: center; align-items: flex-end;
+  padding: 12px 18px 4px; min-height: 146px;
+}
+.patron {
+  --edge: #9a8763;
+  width: 112px; flex: 0 0 auto; position: relative;
+  border-radius: 7px 7px 5px 5px; padding: 7px 7px 6px;
+  background:
+    repeating-linear-gradient(92deg, rgba(0, 0, 0, .13) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #452a1a, #2c1a10);
+  border: 1px solid var(--edge);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .4) inset;
+  transition: transform var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease);
+}
+.patron:hover { transform: translateY(-3px); }
+.patron.r-uncommon { --edge: #b8bdc6; }
+.patron.r-rare { --edge: var(--brass); }
+.patron.r-legendary { --edge: #d7bc73; box-shadow: 0 5px 18px rgba(0, 0, 0, .55), 0 0 20px rgba(232, 199, 107, .22); }
+.patron > * { display: block; }
+.patron .cameo {
+  height: 46px; border-radius: 50% / 42%; margin-bottom: 5px; position: relative; overflow: hidden;
+  background: radial-gradient(circle at 50% 34%, #6d5330, #3a2414 72%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 0 2px var(--edge) inset, 0 1px 3px rgba(0, 0, 0, .5);
+}
+/* 旧规则是"一个大字母占满椭圆"，现在那个位置归肖像。
+   选择器一律带上 .cameo 的后代类，避免又被上面那条通用规则抢走版式。 */
+.patron .cameo::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(60% 40% at 30% 20%, rgba(255, 240, 200, .2), transparent 70%);
+}
+.patron .pname { font-size: 12px; text-align: center; color: #f6ecd6; line-height: 1.2; min-height: 29px; }
+.patron .prole { font-size: 9px; text-align: center; color: #a89272; font-style: italic; margin-bottom: 4px; letter-spacing: .04em; }
+.patron .blurb {
+  font-size: 9.5px; line-height: 1.32; text-align: center; color: #dcc9a6; min-height: 38px;
+  border-top: 1px solid rgba(201, 164, 76, .28); padding-top: 4px;
+}
+.patron .hookchip {
+  position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; letter-spacing: .12em; color: #2a1c08; padding: 1px 6px; border-radius: 0 0 3px 3px;
+  background: linear-gradient(180deg, var(--brass-hi), var(--brass)); opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.patron:hover .hookchip { opacity: 1; }
+.patron .sell {
+  position: absolute; right: 4px; top: 4px; width: 17px; height: 17px; border-radius: 50%;
+  font-size: 10px; line-height: 1; color: #f5e6c6; cursor: pointer; opacity: 0;
+  background: linear-gradient(180deg, #8f2634, #5a1420); border: 1px solid rgba(0, 0, 0, .5);
+  transition: opacity var(--t-fast) var(--ease);
+}
+.patron:hover .sell { opacity: .95; }
+.patron.empty {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(0, 0, 0, .12));
+  border: 1px dashed rgba(201, 164, 76, .3); box-shadow: none;
+}
+.patron.empty .cameo { background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, .06), transparent 70%); }
+/* 虚席那个"+"必须落在椭圆正中。.cameo 会裁掉四角，靠默认的行内排版它会被顶到左上角，
+   于是"看得见"的虚席提示其实一直没画出来——肖像改版把通用居中规则删掉后才暴露。 */
+.patron.empty .cameo { display: grid; place-items: center; }
+.patron.empty .cameo span { color: rgba(246, 236, 214, .25); font-size: 19px; line-height: 1; }
+.patron.empty:hover { transform: none; }
+
+/* 客人被触发：欠身 + 铜框一亮，然后才更新数字——因果要先看见 */
+.patron.pulse { animation: bow .62s linear; }
+/* 致意要"起势快、有停顿、回落带一点过冲"。原来一根曲线跑到底，
+   于是看起来像整体上下平移一次，不像人在点头 */
+@keyframes bow {
+  0%   { transform: translateY(0) scale(1); box-shadow: 0 5px 14px rgba(0, 0, 0, .55);
+         animation-timing-function: cubic-bezier(.1,.82,.3,1); }
+  16%  { transform: translateY(-11px) scale(1.062); box-shadow: 0 13px 24px rgba(0, 0, 0, .6), 0 0 24px rgba(246, 227, 174, .55);
+         animation-timing-function: cubic-bezier(.45,0,.55,1); }
+  44%  { transform: translateY(-9.5px) scale(1.05); box-shadow: 0 12px 22px rgba(0, 0, 0, .6), 0 0 20px rgba(246, 227, 174, .42);
+         animation-timing-function: cubic-bezier(.16,.9,.24,1); }
+  78%  { transform: translateY(1.6px) scale(.994); box-shadow: 0 5px 14px rgba(0, 0, 0, .55); }
+  100% { transform: translateY(0) scale(1); }
+}
+.patron.pulse-x { animation: bowX .70s linear; }
+@keyframes bowX {
+  0%   { transform: translateY(0) scale(1); animation-timing-function: cubic-bezier(.08,.86,.26,1); }
+  13%  { transform: translateY(-15px) scale(1.105); animation-timing-function: cubic-bezier(.5,0,.5,1); }
+  46%  { transform: translateY(-13px) scale(1.085); animation-timing-function: cubic-bezier(.14,.92,.24,1); }
+  80%  { transform: translateY(2.4px) scale(.988); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* ── 牌桌 ─────────────────────────────────────────────────── */
+#board { position: relative; z-index: 8; flex: 1 1 auto; display: flex; flex-direction: column; padding: 0 20px; min-height: 0; }
+.felt {
+  position: relative; flex: 1 1 auto; border-radius: 14px; overflow: hidden; min-height: 0;
+  background:
+    radial-gradient(120% 100% at 50% 0%, var(--felt-3), var(--felt-1) 46%, var(--felt-2) 100%);
+  border: 9px solid transparent;
+  border-image: repeating-linear-gradient(90deg, var(--wood-2), var(--wood-1) 6px, var(--wood-3) 13px) 9;
+  box-shadow: 0 0 60px rgba(0, 0, 0, .55) inset, 0 10px 30px rgba(0, 0, 0, .45);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  transition: transform var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease);
+}
+.felt::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 44%, rgba(255, 244, 210, .11), transparent 62%);
+}
+/* 大分时牌桌轻轻一沉，替代暴力震屏 */
+.felt.settle { animation: settleTable .5s var(--ease); }
+@keyframes settleTable {
+  0% { transform: translateY(0); }
+  30% { transform: translateY(2.5px); box-shadow: 0 0 60px rgba(0, 0, 0, .7) inset, 0 6px 18px rgba(0, 0, 0, .5); }
+  100% { transform: translateY(0); }
+}
+
+#tableCards, #tray { position: relative; display: flex; justify-content: center; align-items: flex-end; gap: 6px; min-height: calc(var(--card-h) + 16px); }
+#tableCards { min-height: calc(var(--card-h) + 8px); }
+#tableCards .card { transform: translateY(0) rotate(0); }
+
+.readout { display: flex; align-items: center; gap: 14px; transition: opacity var(--t-slow) var(--ease); }
+.readout.idle { opacity: .42; }
+.readout .roll { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.readout .tag { font-size: 9px; letter-spacing: .28em; color: rgba(244, 234, 212, .62); }
+.readout .sign, .readout .eq { font-family: var(--display); font-size: 21px; color: rgba(244, 234, 212, .55); }
+.readout .chips .reel { color: #cfe2ff; text-shadow: 0 0 16px rgba(120, 170, 255, .3); }
+.readout .mult .reel { color: #ffc9bd; text-shadow: 0 0 16px rgba(255, 120, 110, .3); }
+.readout .total .reel { color: var(--gold-leaf); text-shadow: 0 0 22px rgba(255, 210, 120, .42); }
+.readout .reel { font-family: var(--display); font-size: 40px; }
+.readout .total .reel { font-size: 54px; }
+.readout .roll.bump .reel { animation: bump .40s linear; }
+@keyframes bump {
+  0%   { transform: scale(1); animation-timing-function: cubic-bezier(.05,.9,.25,1); }
+  28%  { transform: scale(1.19); animation-timing-function: cubic-bezier(.42,0,.55,1); }
+  68%  { transform: scale(.972); animation-timing-function: cubic-bezier(.2,1.7,.4,1); }
+  100% { transform: scale(1); }
+}
+
+/* 机械数字滚轴：每位单独裁在一格高度里，整列位移，像黄铜计数器 */
+.reel { display: inline-flex; align-items: flex-start; line-height: 1; }
+.reel .digit { display: block; height: 1em; overflow: hidden; width: .58em; }
+.reel .digit.sep { width: .3em; }
+.reel .col {
+  display: block; will-change: transform;
+  /* 黄铜计数器滚到位会轻轻过一格再落回去；一路减速贴上去就像在淡出 */
+  transition: transform .42s cubic-bezier(.24,1.06,.32,1.02);
+}
+.reel .col b { display: block; height: 1em; line-height: 1; font-weight: 400; text-align: center; }
+
+.scoreline { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; padding: 9px 4px 11px; }
+.scoreline .track {
+  position: relative; flex: 1 1 auto; height: 7px; border-radius: 4px; overflow: hidden;
+  background: rgba(0, 0, 0, .4); box-shadow: 0 1px 2px rgba(0, 0, 0, .5) inset, 0 0 0 1px rgba(201, 164, 76, .25);
+}
+.scoreline .track i {
+  position: absolute; inset: 0 auto 0 0; width: 0%;
+  background: linear-gradient(90deg, #8f6b1c, var(--gold-leaf) 70%, #fff2c8);
+  box-shadow: 0 0 12px rgba(255, 214, 130, .5);
+  transition: width .5s var(--ease);
+  overflow: hidden;
+}
+/* 水位反光：一道高光从左往慢推，像烛光从液面上滑过。
+   用 transform 而不是 background-position——后者每帧触发重绘，浪费合成。 */
+.scoreline .track i::after {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  left: -60%; width: 60%;
+  background: linear-gradient(90deg, transparent, rgba(255, 246, 214, .32), transparent);
+  animation: shimmer 3.4s linear infinite;
+  will-change: transform;
+}
+@keyframes shimmer {
+  from { transform: translateX(0); }
+  to { transform: translateX(333%); }
+}
+.scoreline .scorenum { font-family: var(--display); font-size: 16px; color: #e9dcbb; white-space: nowrap; }
+.scoreline .scorenum b { color: #fff0c4; font-size: 20px; }
+.scoreline .scorenum span { color: #a89272; font-size: 13px; }
+
+/* P0-3 阈值刻度：水位条上标出"下一条线在哪儿" */
+.scoreline .track .tmark {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px;
+  background: rgba(232, 199, 107, .7); box-shadow: 0 0 4px rgba(232, 199, 107, .5);
+  pointer-events: auto; cursor: help;
+}
+.gap-note {
+  position: absolute; right: 0; bottom: 100%; margin-bottom: 3px;
+  font-size: 10px; font-style: italic; color: #b39a6d; letter-spacing: .04em; white-space: nowrap;
+}
+.scoreline { position: relative; }
+/* 阈值达成飘出来的名字——只看见数字涨不算解释，要写明跨过的是哪条线 */
+.cue-pop {
+  position: absolute; left: 50%; top: -6px; transform: translateX(-50%);
+  font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: #ffe9a8;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .8); pointer-events: none; white-space: nowrap;
+  animation: cueRise 1.1s var(--ease-out) forwards;
+}
+@keyframes cueRise {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(.9); }
+  22% { opacity: 1; transform: translate(-50%, -4px) scale(1.04); }
+  100% { opacity: 0; transform: translate(-50%, -22px) scale(1); }
+}
+
+/* ── 牌 ───────────────────────────────────────────────────── */
+.card {
+  --lift: 0px;
+  position: relative; flex: 0 0 auto; width: var(--card-w); height: var(--card-h);
+  border-radius: 7px; cursor: pointer; color: var(--ink);
+  /* 纸：底色斜向渐变 + 一层几乎看不见的纤维交叉，边缘再压一道做旧的暗角 */
+  background:
+    repeating-linear-gradient(52deg, rgba(120, 92, 50, .035) 0 .6px, transparent .6px 3px),
+    repeating-linear-gradient(-38deg, rgba(120, 92, 50, .028) 0 .6px, transparent .6px 3.4px),
+    radial-gradient(120% 90% at 50% 45%, transparent 58%, rgba(120, 92, 50, .1) 100%),
+    linear-gradient(158deg, #fbf4e2 0%, var(--ivory) 42%, var(--ivory-2) 100%);
+  box-shadow: 0 2px 0 rgba(255, 255, 255, .5) inset, 0 0 0 1px rgba(120, 92, 50, .55),
+              0 7px 14px rgba(0, 0, 0, .45), 0 1px 2px rgba(0, 0, 0, .4);
+  transition: transform var(--t-mid) var(--ease-enter), translate var(--t-mid) var(--ease-enter),
+              box-shadow var(--t-mid) var(--ease), opacity var(--t-fast) var(--ease-leave);
+  will-change: transform, translate;
+}
+.card::before {
+  /* 内圈细线，象牙卡面的版画味 */
+  content: ''; position: absolute; inset: 4px; border-radius: 4px;
+  border: 1px solid rgba(120, 92, 50, .3); pointer-events: none;
+}
+/* 花色一律走内联 SVG（core/pips.ts），fill 用 currentColor：
+   红黑只由卡面的 color 决定，四套画法也就能各自换色 */
+.suit-svg { fill: currentColor; display: block; }
+.card .corner { position: absolute; line-height: 1; color: var(--ink); font-family: var(--display); }
+.card .corner.tl { top: 7px; left: 8px; text-align: center; }
+.card .corner.br { bottom: 7px; right: 8px; transform: rotate(180deg); text-align: center; }
+.card .corner .r { display: block; font-size: 16px; letter-spacing: 0; }
+.card .corner .s { display: block; width: calc(var(--card-w) * .12); margin: 1px auto 0; }
+.card .corner .s .suit-svg { width: 100%; }
+/* 点位：坐标是 0..1 的归一值，落在这个内缩过的场里，所以窄屏那档也不会挤到角标 */
+.card .pips { position: absolute; inset: 21px 13px; }
+.card .pips .pip {
+  position: absolute; width: calc(var(--card-w) * .155);
+  transform: translate(-50%, -50%); color: var(--ink); opacity: .95;
+}
+.card .pips .pip.flip { transform: translate(-50%, -50%) rotate(180deg); }
+.card .pips .pip .suit-svg { width: 100%; }
+/* 9 与 10 挤：四行两列再加中间列，不给小一号就会糊成一团（审片档实测） */
+.card .pips.r9 .pip, .card .pips.r10 .pip { width: calc(var(--card-w) * .125); }
+/* A：放大一枚 + 双线环，主牌要有主牌的份量 */
+.card .pip.ace { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink); }
+.card .pip.ace .suit-svg.big { width: calc(var(--card-w) * .46); }
+/* 人头牌是真牌那种"双头"：上下各半，下半部整个旋转 180° */
+.card .face {
+  position: absolute; inset: 24px 15px; overflow: hidden;
+  border: 1px solid rgba(120, 92, 50, .34); border-radius: 3px;
+  /* 面板底色压到几乎看不见：原来那层金渐变在 100px 的牌面上糊成一块金斑，
+     把纹章整个吃掉。双线框的版画味靠 ::after 那道中缝就够 */
+  background: linear-gradient(180deg, rgba(201, 164, 76, .05), transparent 46%,
+                              rgba(120, 92, 50, .04));
+}
+.card .face::after {
+  content: ''; position: absolute; left: 10%; right: 10%; top: 50%; height: 1px;
+  background: rgba(120, 92, 50, .34);
+}
+.card .fh { position: absolute; left: 0; right: 0; height: 50%; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.card .fh.up { top: 0; }
+.card .fh.down { top: 50%; transform: rotate(180deg); }
+.card .fh .ltr { font-family: var(--display); font-size: calc(var(--card-w) * .2); line-height: 1; }
+/* 人头牌的小像。名字不能叫 .crest——那是标题页那颗黄铜徽章（自带金渐变），
+   撞上之后纹章整块变成金色，审片档一眼看出来 */
+.card .fh .coat { width: 44%; height: auto; opacity: .85; }
+
+.card.red { color: var(--oxblood); }
+.card.red .corner, .card.red .pip, .card.red .face .ltr { color: var(--oxblood); }
+.card.chosen { box-shadow: 0 2px 0 rgba(255, 255, 255, .6) inset, 0 0 0 2px var(--brass), 0 12px 22px rgba(0, 0, 0, .5), 0 0 22px rgba(232, 199, 107, .3); }
+#tray .card { transform: translateY(calc(var(--base, 0px) + var(--extra, 0px))) rotate(var(--rot, 0deg)); }
+/* 选中抬起要带一点过冲：像真的把牌从桌上拈起来；
+   手牌合拢（translate）也带过冲，不然六张牌是"滑"到一起的 */
+#tray .card { transition: transform .30s var(--ease-settle), box-shadow var(--t-mid) var(--ease),
+              translate .34s cubic-bezier(.2,1.24,.36,1), opacity var(--t-fast) var(--ease-leave); }
+#tray .card:hover { --extra: -22px; }
+#tray .card.chosen { --extra: -30px; }
+#tray .card.chosen:hover { --extra: -34px; }
+.card.dealing { animation: deal .44s linear both; }
+/* 发牌从牌墙甩进手里：冲过头一点再回稳。
+   关键帧必须把扇形姿态（--base/--rot）叠进去，否则发牌过程中牌是平的，
+   类一移除又瞬间歪回去 —— 那是第二次"塌姿势"。 */
+@keyframes deal {
+  0%   { opacity: 0;
+         transform: translateY(calc(var(--base, 0px) + var(--extra, 0px) + 30px)) rotate(calc(var(--rot, 0deg) - 5deg)) scale(.88);
+         animation-timing-function: cubic-bezier(.08,.82,.24,1); }
+  38%  { opacity: 1;
+         transform: translateY(calc(var(--base, 0px) + var(--extra, 0px) - 6px)) rotate(calc(var(--rot, 0deg) + 1.2deg)) scale(1.035);
+         animation-timing-function: cubic-bezier(.4,0,.6,1); }
+  78%  { transform: translateY(calc(var(--base, 0px) + var(--extra, 0px) + 2px)) rotate(calc(var(--rot, 0deg) - .5deg)) scale(.99);
+         animation-timing-function: cubic-bezier(.2,1.6,.4,1); }
+  100% { opacity: 1;
+         transform: translateY(calc(var(--base, 0px) + var(--extra, 0px))) rotate(var(--rot, 0deg)) scale(1); }
+}
+.card.hop { animation: hop .46s linear; }
+/* 计分弹跳要有预备下压、有挤压、落定带过冲。原来只有"抬一下再回来"，
+   一根曲线跑到底，看着像卡片在轨道上滑 */
+@keyframes hop {
+  0%   { transform: translateY(0) scale(1); animation-timing-function: cubic-bezier(.4,0,.7,.25); }
+  13%  { transform: translateY(3px) scale(1.012, .962); animation-timing-function: cubic-bezier(.08,.82,.24,1); }
+  44%  { transform: translateY(-20px) rotate(-2.4deg) scale(.988, 1.05); animation-timing-function: cubic-bezier(.36,0,.62,1); }
+  82%  { transform: translateY(2px) rotate(.5deg) scale(1.014, .978); animation-timing-function: cubic-bezier(.2,1.5,.4,1); }
+  100% { transform: translateY(0) rotate(0deg) scale(1); }
+}
+.card.blocked { opacity: .34; filter: grayscale(.85) brightness(.86); }
+.card.shatter { animation: shatter .55s var(--ease) forwards; }
+@keyframes shatter {
+  0% { opacity: 1; filter: none; }
+  40% { opacity: .8; filter: brightness(1.6) blur(.4px); transform: scale(1.05); }
+  100% { opacity: 0; filter: blur(3px); transform: scale(.86) translateY(14px); }
+}
+.card.gain { animation: gain .54s linear; }
+@keyframes gain {
+  0%   { transform: translateY(0) scale(1); animation-timing-function: cubic-bezier(.1,.85,.28,1); }
+  30%  { transform: translateY(-9px) scale(1.1); animation-timing-function: cubic-bezier(.4,0,.6,1); }
+  72%  { transform: translateY(1.4px) scale(.986); animation-timing-function: cubic-bezier(.2,1.6,.4,1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* 强化牌：只用边框色与一层材质区分，语义固定不混用 */
+.card.e-bonus { box-shadow: 0 0 0 2px #6f8fc4, 0 7px 14px rgba(0, 0, 0, .45); }
+.card.e-bonus::after { content: ''; position: absolute; inset: 4px; border-radius: 4px; border: 1px solid rgba(111, 143, 196, .5); }
+.card.e-mult { box-shadow: 0 0 0 2px #d0646f, 0 7px 14px rgba(0, 0, 0, .45); }
+.card.e-mult::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 15px; transform: translateY(-50%); background: linear-gradient(90deg, rgba(208, 100, 111, .3), rgba(208, 100, 111, .12)); }
+.card.e-glass::after {
+  content: ''; position: absolute; inset: 0; border-radius: 7px;
+  background: linear-gradient(112deg, transparent 22%, rgba(255, 255, 255, .78) 46%, rgba(190, 226, 255, .5) 54%, transparent 74%);
+  background-size: 260% 100%; animation: sheen 3.4s linear infinite; mix-blend-mode: screen;
+}
+@keyframes sheen { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+.card.e-gold { background: linear-gradient(158deg, #fdf1cd, #e9c974 55%, #cfa53f); }
+.card.e-gold .corner, .card.e-gold .pip { color: #6b4c10; }
+
+/* ── 手牌托盘与仪表 ───────────────────────────────────────── */
+#trayWrap {
+  position: relative; z-index: 9; flex: 0 0 auto;
+  display: grid; grid-template-columns: 150px 1fr 178px; align-items: end; gap: 14px;
+  padding: 4px 20px 12px;
+  background: linear-gradient(180deg, transparent, rgba(8, 5, 2, .5));
+}
+.satchel { display: flex; flex-direction: column; gap: 6px; min-height: 118px; justify-content: flex-end; }
+.item {
+  position: relative; border-radius: 5px; padding: 5px 7px; cursor: pointer; font-size: 10.5px; line-height: 1.25;
+  background: linear-gradient(180deg, #efe3c6, #d9c8a2);
+  color: #2a1d0d; border: 1px solid rgba(90, 66, 30, .55);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .45);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.item:hover { transform: translateY(-2px); box-shadow: 0 5px 10px rgba(0, 0, 0, .5); }
+.item.book { background: linear-gradient(180deg, #d8e2f2, #b6c6e0); }
+.item .kind { font-size: 8.5px; letter-spacing: .2em; opacity: .65; display: block; }
+.item.armed { outline: 2px solid var(--brass); outline-offset: 1px; }
+.satchel .empty-note { font-size: 10px; color: #8a7a5f; font-style: italic; text-align: center; }
+
+#gauges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-content: flex-end; }
+/* 出牌与弃牌以前只有键盘（空格 / X）按得动，鼠标玩家必须点得动同一件事。
+   按钮贴在读数下面那一列里（#trayWrap 是三列网格，多一个格子会把牌桌挤窄，所以包一层）。 */
+.gcol { display: flex; flex-direction: column; gap: 7px; align-items: stretch; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.actions .skip { grid-column: 1 / -1; }
+.actions .brass-btn { padding: 8px 6px; font-size: 14px; letter-spacing: .2em; }
+.actions .brass-btn.big { font-size: 15px; padding: 9px 6px; letter-spacing: .26em; }
+.gauge, .purse, .rep {
+  min-width: 66px; text-align: center; padding: 5px 8px 6px; border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(0, 0, 0, .22));
+  border: 1px solid rgba(201, 164, 76, .38);
+}
+.gauge .lbl, .purse .lbl, .rep .lbl { display: block; font-size: 8.5px; letter-spacing: .24em; color: #b39a6d; }
+.gauge b, .purse b, .rep b { font-family: var(--display); font-size: 21px; color: #f4e8c8; }
+.purse b { color: #8fdca4; }
+.rep b { color: var(--gold-leaf); }
+.gauge.spent { opacity: .4; }
+
+.hint {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 40;
+  font-size: 10.5px; color: rgba(200, 182, 148, .5); letter-spacing: .06em; white-space: nowrap;
+}
+.hint kbd {
+  font-family: var(--serif); font-size: 10px; padding: 1px 4px; border-radius: 3px;
+  background: rgba(255, 255, 255, .1); border: 1px solid rgba(201, 164, 76, .3);
+}
+.notice {
+  position: absolute; left: 50%; bottom: 196px;
+  transform: translate(-50%, 14px) scale(.96); z-index: 55;
+  font-size: 13.5px; letter-spacing: .06em; color: #ffeec6; font-style: italic;
+  padding: 7px 18px; border-radius: 3px; opacity: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(58, 36, 18, .92), rgba(30, 18, 8, .92));
+  border: 1px solid rgba(201, 164, 76, .45);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .55);
+  transition: opacity .28s var(--ease), transform .36s var(--ease-settle);
+}
+.notice.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+/* ── 新手引导的教练气泡 ────────────────────────────────────────
+   层叠：面板 70 < 气泡 75 < 幕/终局 90。低于面板的话，铺子里那两条
+   会被面板整个盖住（实测截图里气泡"存在但看不见"），高于幕又会在过场时抢戏。
+   定位由 JS 算（贴在锚点旁边），这里只管长相与"不吃点击"。
+   容器 pointer-events:none 是硬要求：气泡会压在牌桌/按钮附近，
+   拦住玩家第一次操作的话，教程比没有教程更糟。 */
+.coach {
+  position: fixed; z-index: 75; width: 268px; padding: 10px 13px 9px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(52, 34, 16, .96), rgba(26, 15, 7, .96));
+  border: 1px solid rgba(201, 164, 76, .55); border-radius: 4px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .6), 0 0 0 1px rgba(0, 0, 0, .4) inset;
+  animation: coachIn .34s var(--ease-bow) both;
+}
+.coach.hidden { display: none; }
+@keyframes coachIn {
+  0% { opacity: 0; transform: translateY(-6px) scale(.97); }
+  100% { opacity: 1; transform: none; }
+}
+.coach .ch-t {
+  display: block; font-family: var(--display); font-size: 13px; letter-spacing: .06em;
+  color: var(--brass-hi); margin-bottom: 4px;
+}
+.coach .ch-b { display: block; font-size: 11.5px; line-height: 1.55; color: #e6d5b2; }
+.coach .ch-act { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.coach button {
+  pointer-events: auto; cursor: pointer; font-family: var(--serif);
+  font-size: 10.5px; letter-spacing: .08em; padding: 3px 10px; border-radius: 3px;
+  color: #2a1c08; background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+  border: 1px solid rgba(0, 0, 0, .4);
+}
+.coach button.ch-skip {
+  color: #c9b48a; background: none; border-color: rgba(201, 164, 76, .35);
+}
+.coach button:hover { filter: brightness(1.14); }
+/* 气泡指向锚点的那根小尾巴：靠 dataset.anchor 决定朝上还是朝下 */
+.coach::after {
+  content: ''; position: absolute; left: 50%; width: 10px; height: 10px;
+  transform: translateX(-50%) rotate(45deg);
+  background: rgba(52, 34, 16, .96); border: 1px solid rgba(201, 164, 76, .55);
+}
+.coach[data-below='1']::after { top: -6px; border-right: 0; border-top: 0; }
+.coach[data-below='0']::after { bottom: -6px; border-left: 0; border-bottom: 0; }
+html[data-snap='1'] .coach { animation: none; }
+
+/* ── 引导关：一节课比路过提醒重一档 ─────────────────────────
+   序号与"现在做这个"两行只在 .lesson 下显形，普通提醒共用同一个节点。 */
+.coach.lesson {
+  border-color: var(--brass-hi);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .55), 0 0 0 1px rgba(201, 164, 76, .22);
+}
+.coach .ch-n, .coach .ch-do { display: none; }
+.coach.lesson .ch-n {
+  display: block; margin-bottom: 3px;
+  font-size: 9.5px; letter-spacing: .18em; color: rgba(201, 164, 76, .82);
+}
+.coach.lesson .ch-do {
+  display: block; margin-top: 8px; padding: 4px 9px; font-style: normal;
+  font-size: 11.5px; color: #2a1c08; border-radius: 3px;
+  background: linear-gradient(90deg, var(--brass-hi), rgba(201, 164, 76, .72));
+}
+
+/* 第一次开机那张课表卡：借用 .deed 的纸面，只加一节列表 */
+/* 开场卡上那两块"先讲清楚"：第一次玩的人最缺的不是操作，是**这局到底在干什么**。
+   左对齐 + 行距宽一点，是因为这是一页要读的正文，不是列表装饰 */
+.intro-block { margin: 12px 0 0; text-align: left; }
+.intro-h { margin: 0 0 2px; font-family: var(--display); font-size: 15px; letter-spacing: .16em; color: #6b4f22; }
+.intro-block ul { margin: 0; padding-left: 20px; }
+.intro-block li { font-size: 12.5px; line-height: 1.85; }
+.intro-block li::marker { color: var(--brass); }
+.intro-block b { color: #2f2210; font-weight: 600; }
+
+/* ── 侧页（铺子 / 账本）────────────────────────────────────── */
+.panel {
+  position: fixed; top: 0; bottom: 0; right: 0; width: min(556px, 78vw); z-index: 70;
+  display: flex; flex-direction: column;
+  background:
+    repeating-linear-gradient(0deg, rgba(120, 92, 50, .05) 0 1px, transparent 1px 26px),
+    linear-gradient(180deg, #f6ecd6, #e7d8b6);
+  color: var(--ink);
+  border-left: 3px solid var(--wood-1);
+  box-shadow: -22px 0 50px rgba(0, 0, 0, .6);
+  transform: translateX(101%);
+  /* 抽屉要"撞到位"：末段轻微过冲再回稳，比一路减速贴上来有分量 */
+  transition: transform .52s cubic-bezier(.18,.9,.28,1.035), box-shadow .52s var(--ease);
+}
+.panel.open { transform: none; box-shadow: -30px 0 64px rgba(0, 0, 0, .68); }
+.panel::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, .3), transparent);
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 10px;
+  border-bottom: 2px solid rgba(120, 92, 50, .35);
+  background: linear-gradient(180deg, rgba(201, 164, 76, .22), transparent);
+}
+.panel-head h2 { margin: 0; font-family: var(--display); font-size: 24px; letter-spacing: .28em; color: #3a2a14; }
+.close {
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 13px; color: #3a2a14;
+  background: linear-gradient(180deg, #f2e6c9, #d8c8a4); border: 1px solid rgba(120, 92, 50, .5);
+}
+.close:hover { filter: brightness(1.06); }
+.panel-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px 26px; }
+
+.shop-money { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.shop-money b { font-family: var(--display); font-size: 26px; color: #245c36; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.slot {
+  position: relative; border-radius: 6px; padding: 10px 10px 9px; cursor: pointer;
+  background: linear-gradient(180deg, #fffaf0, #ece0c2);
+  border: 1px solid rgba(120, 92, 50, .45);
+  box-shadow: 0 3px 8px rgba(90, 66, 30, .18);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.slot:hover { transform: translateY(-2px); box-shadow: 0 7px 14px rgba(90, 66, 30, .26); }
+.slot .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.slot .nm { font-size: 13.5px; font-weight: 600; color: #2b2117; }
+.slot .pr { font-family: var(--display); font-size: 15px; color: #245c36; }
+.slot .rl { font-size: 9px; letter-spacing: .18em; color: #8a6a3a; }
+.slot .de { font-size: 11px; line-height: 1.4; color: #4a3a26; margin-top: 5px; min-height: 31px; }
+.slot.disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.slot.sold { opacity: .38; cursor: default; }
+.slot.sold::after {
+  content: '已售'; position: absolute; right: 8px; top: 8px;
+  font-size: 10px; color: #8c2030; letter-spacing: .2em;
+  border: 1px solid rgba(140, 32, 48, .55); border-radius: 2px; padding: 1px 5px;
+  background: rgba(140, 32, 48, .06);
+  animation: stampIn .38s var(--ease-settle) both;
+}
+@keyframes stampIn {
+  0% { opacity: 0; transform: scale(1.9) rotate(-9deg); }
+  55% { opacity: 1; transform: scale(.93) rotate(1.5deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.slot.wide { grid-column: 1 / -1; }
+
+.raise {
+  margin-top: 18px; padding: 13px 14px; border-radius: 6px;
+  background: linear-gradient(180deg, rgba(140, 32, 48, .1), rgba(140, 32, 48, .03));
+  border: 1px solid rgba(140, 32, 48, .35);
+}
+.raise h3 { margin: 0 0 4px; font-size: 15px; letter-spacing: .2em; color: #6e1420; }
+.raise p { margin: 0 0 10px; font-size: 11.5px; line-height: 1.55; color: #5b4a35; font-style: italic; }
+.raise .steps { display: flex; gap: 7px; flex-wrap: wrap; }
+.raise .step {
+  flex: 1 1 0; min-width: 58px; text-align: center; cursor: pointer; padding: 7px 4px; border-radius: 4px;
+  background: linear-gradient(180deg, #fffaf0, #e6d8b8); border: 1px solid rgba(120, 92, 50, .4);
+  font-size: 11.5px; color: #3a2a14;
+  transition: transform .26s var(--ease-settle), background-color var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.raise .step:hover { transform: translateY(-2px); }
+.raise .step.on { background: linear-gradient(180deg, #8c2030, #5d1220); color: #ffe9d6; border-color: #4a0e18; box-shadow: 0 4px 10px rgba(93, 18, 32, .35); }
+.raise .step small { display: block; font-size: 9.5px; opacity: .75; margin-top: 2px; }
+.shop-foot { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+.shop-foot .reroll { font-size: 11px; color: #5b4a35; }
+.panel .leave { margin-left: auto; }
+.seatnote { font-size: 11.5px; color: #6a5540; text-align: center; margin: 12px 0 2px; font-style: italic; }
+
+table.ledger-t { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+table.ledger-t th {
+  text-align: right; font-weight: 600; color: #7a6039; letter-spacing: .12em; font-size: 9.5px;
+  padding: 0 0 5px; border-bottom: 1px solid rgba(120, 92, 50, .4);
+}
+table.ledger-t th:first-child, table.ledger-t td:first-child { text-align: left; }
+table.ledger-t td { padding: 5px 0; text-align: right; border-bottom: 1px dotted rgba(120, 92, 50, .28); color: #34281a; }
+table.ledger-t td.gain { color: #1d6b3c; }
+table.ledger-t td.loss { color: #8c2030; }
+.receipt { margin-top: 16px; padding: 11px 13px; border: 1px solid rgba(120, 92, 50, .35); border-radius: 5px; background: rgba(255, 255, 255, .4); }
+.receipt h4 { margin: 0 0 7px; font-size: 12px; letter-spacing: .22em; color: #6a5540; }
+.receipt .ln { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; color: #34281a; }
+.receipt .ln.total { border-top: 1px solid rgba(120, 92, 50, .35); margin-top: 5px; padding-top: 5px; font-weight: 600; }
+.discover { margin-top: 14px; font-size: 11.5px; color: #5b4a35; line-height: 1.6; }
+
+/* ── 幕卡 ─────────────────────────────────────────────────── */
+.overlay {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+  background: radial-gradient(ellipse at 50% 40%, rgba(16, 10, 4, .82), rgba(6, 4, 2, .95));
+  opacity: 1; transition: opacity .5s var(--ease);
+}
+.overlay.hidden { opacity: 0; pointer-events: none; }
+.deed {
+  width: min(620px, 88vw); max-height: 88vh; overflow-y: auto; text-align: center; padding: 30px 40px 26px;
+  border-radius: 8px; color: var(--ink);
+  background:
+    repeating-linear-gradient(0deg, rgba(120, 92, 50, .045) 0 1px, transparent 1px 27px),
+    linear-gradient(180deg, #f7eeda, #e8dabb);
+  border: 10px solid transparent;
+  border-image: repeating-linear-gradient(90deg, var(--wood-2), var(--wood-1) 7px, var(--wood-3) 15px) 10;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .7), 0 0 0 1px rgba(201, 164, 76, .5);
+  transform: translateY(0) scale(1); transition: transform .55s var(--ease);
+}
+.overlay.hidden .deed { transform: translateY(14px) scale(.985); }
+.deed h1 { margin: 4px 0 6px; font-family: var(--display); font-size: 46px; letter-spacing: .3em; color: #2f2210; font-weight: 400; }
+.deed .sub { margin: 0 0 18px; font-size: 13px; color: #6a5540; font-style: italic; letter-spacing: .06em; }
+.deed .rules { text-align: left; margin: 0 auto 20px; max-width: 470px; }
+.deed .rules p { font-size: 12.5px; line-height: 1.75; color: #443521; margin: 0 0 9px; }
+.deed .rules b { color: #6e1420; font-weight: 600; }
+.seedrow { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 18px; }
+.seedrow label { font-size: 11px; letter-spacing: .24em; color: #7a6039; }
+.seedrow input {
+  font-family: var(--display); font-size: 17px; text-align: center; width: 130px; color: #2b2117;
+  background: rgba(255, 255, 255, .6); border: 1px solid rgba(120, 92, 50, .5); border-radius: 4px; padding: 4px 7px;
+}
+.keys { margin-top: 14px; font-size: 10.5px; color: #8a7a5f; letter-spacing: .08em; }
+.summary { display: flex; justify-content: center; gap: 22px; margin: 6px 0 20px; flex-wrap: wrap; }
+.summary div { text-align: center; }
+.summary .lbl { display: block; font-size: 9.5px; letter-spacing: .24em; color: #7a6039; }
+.summary b { font-family: var(--display); font-size: 27px; color: #2f2210; }
+.row-btns { display: flex; gap: 12px; justify-content: center; }
+
+.waxseal {
+  width: 74px; height: 74px; margin: 0 auto 10px; border-radius: 50%; position: relative;
+  background: radial-gradient(circle at 38% 32%, #b8394a, #7c1a27 58%, #51101a 100%);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .45), inset 0 -3px 8px rgba(0, 0, 0, .4), inset 0 3px 6px rgba(255, 190, 200, .25);
+}
+.waxseal::after {
+  content: '♠'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 32px; color: rgba(60, 8, 16, .6); text-shadow: 0 1px 0 rgba(255, 200, 205, .35);
+}
+.overlay:not(.hidden) .waxseal { animation: stamp .55s var(--ease-out); }
+@keyframes stamp {
+  0% { transform: scale(1.9) rotate(-14deg); opacity: 0; }
+  60% { transform: scale(.94) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+
+/* 结算收口的金纸闪过：只在过关时出现 */
+.felt.cleared { animation: cleared 1.15s var(--ease); }
+@keyframes cleared {
+  0% { box-shadow: 0 0 60px rgba(0, 0, 0, .55) inset; }
+  28% { box-shadow: 0 0 70px rgba(255, 214, 130, .5) inset, 0 0 40px rgba(255, 214, 130, .3); }
+  100% { box-shadow: 0 0 60px rgba(0, 0, 0, .55) inset; }
+}
+
+/* 抓帧模式：窗口没上屏时 WebKit 的动画时钟与 setTimeout 会冻结，
+   所以过渡必须显式关掉，状态改变才能立刻落到像素上。 */
+html[data-snap='1'] *, html[data-snap='1'] *::before, html[data-snap='1'] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+/* 凡是"靠动画才从隐藏走到可见"的元素，关掉动画后必须手动落到终态，
+   否则抓帧抓到的是它的起始帧（结清明细曾经整排隐形就是这么来的） */
+html[data-snap='1'] #curtainLines .cl { opacity: 1; transform: none; }
+html[data-snap='1'] #eventRow .ev-card { opacity: 1; transform: none; }
+html[data-snap='1'] .card.dealing { opacity: 1; transform: none; }
+/* 静态"正在说话"的客座态：snap 抓帧时用它代替 pulse 动画 */
+.patron.cue {
+  transform: translateY(-9px);
+  box-shadow: 0 12px 22px rgba(0, 0, 0, .6), 0 0 24px rgba(246, 227, 174, .55);
+}
+.card.gone { opacity: 0; }
+
+/* ── 版本与蜡封（两条正交轴的可视化）────────────────────────── */
+/* 客人版本：只在铜框上做文章，不改名字位置 */
+.patron.ed-foil { --edge: #9fb6cf; }
+.patron.ed-holo { --edge: #b9a3d6; }
+.patron.ed-polychrome { --edge: #f0c987; }
+.patron.ed-polychrome .cameo::after {
+  background: linear-gradient(118deg, rgba(255, 180, 180, .3), rgba(180, 255, 210, .3) 40%, rgba(180, 200, 255, .3) 70%);
+}
+.patron.ed-negative { --edge: #584a6b; }
+.patron.ed-negative .cameo { background: radial-gradient(circle at 50% 34%, #2c2233, #14101b 72%); }
+.patron .cameo i.ed {
+  position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%);
+  font-size: 8px; letter-spacing: .14em; font-style: normal; padding: 0 5px;
+  border-radius: 4px 4px 0 0; color: #24170a; background: var(--edge);
+}
+
+/* 卡牌蜡封：一枚火漆点，颜色语义固定 */
+.card .sealdot {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 9px; color: rgba(255, 240, 240, .85);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5), inset 0 -1px 2px rgba(0, 0, 0, .35);
+}
+.card.s-red .sealdot { background: radial-gradient(circle at 36% 30%, #c3495a, #7c1a27 70%); }
+.card.s-gold .sealdot { background: radial-gradient(circle at 36% 30%, #f4dc95, #a8801f 70%); color: #4a3208; }
+.card.s-purple .sealdot { background: radial-gradient(circle at 36% 30%, #9d7fc4, #4b2f6b 70%); }
+.card.s-blue .sealdot { background: radial-gradient(circle at 36% 30%, #7fa8d8, #2c4f7a 70%); }
+
+/* 引荐信选靶态：与"选中出牌"用完全不同的视觉，避免两种语义混起来 */
+.card.target { box-shadow: 0 0 0 2px #6f8fc4, 0 10px 20px rgba(0, 0, 0, .5), 0 0 20px rgba(140, 180, 240, .4); }
+#tray .card.target { --extra: -26px; }
+
+.satchel-cap { font-size: 8.5px; letter-spacing: .22em; color: #b39a6d; text-align: center; margin-bottom: 2px; }
+
+/* 起手牌组选择：纵列紧凑行，牌组加多了也不会排成孤卡 */
+.lbl2 { font-size: 10px; letter-spacing: .3em; color: #7a6039; margin-bottom: 7px; }
+
+/* 玩法与难度：标签与铜牌同一行，两行文字说明压成一行 —— 契据本来就要装五副牌，
+   再高就得滚动才看到"入席"，那是主操作被藏起来 */
+.pickrow { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+.pickrow .lbl2 { margin: 0; flex: 0 0 auto; }
+.pickers { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 0; }
+.pick {
+  font-family: var(--serif); font-size: 12px; letter-spacing: .12em; cursor: pointer;
+  padding: 5px 12px; border-radius: 3px; color: #3a2a14;
+  background: linear-gradient(180deg, #fffaf0, #e6d8b8); border: 1px solid rgba(120, 92, 50, .35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .6) inset, 0 2px 5px rgba(90, 66, 30, .16);
+  transition: transform .2s var(--ease-settle), background-color var(--t-fast) var(--ease),
+              box-shadow var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.pick:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(90, 66, 30, .24); }
+.pick:active { transform: translateY(1px); }
+/* 轮数那一排有 13 格：不收紧就换行，标题页跟着往下顶，"入席"那颗就得滚了才看得见 */
+.pick.len { padding: 5px 8px; letter-spacing: .02em; min-width: 20px; text-align: center; }
+.pick.on {
+  background: linear-gradient(180deg, #3a5c40, #22412a); border-color: var(--brass); color: #f4e8c8;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 0 0 1px rgba(201, 164, 76, .5), 0 3px 9px rgba(0, 0, 0, .3);
+}
+.picknote {
+  min-height: 1.5em; margin: 2px 0 12px; font-size: 11.5px; line-height: 1.4; font-style: italic;
+  color: #6a5540; text-align: left; padding: 0 2px;
+}
+.picknote b { color: #6e1420; font-style: normal; }
+/* 规则默认收起：契据要装五副牌 + 玩法难度两排，展开着的话"入席"就掉到折叠线以下了 */
+.rules-fold { margin: 0 0 14px; text-align: left; }
+.rules-fold summary {
+  cursor: pointer; font-size: 11px; letter-spacing: .22em; color: #7a6039;
+  list-style: none; padding: 3px 0;
+}
+.rules-fold summary::-webkit-details-marker { display: none; }
+.rules-fold summary::before { content: '▸ '; color: var(--brass); }
+.rules-fold[open] summary::before { content: '▾ '; }
+.rules-fold[open] .rules { margin-top: 6px; }
+#seedRow.locked { opacity: .42; }
+#seedRow.locked input, #seedRow.locked button { pointer-events: none; }
+.pickers.locked { opacity: .5; }
+.pickers.locked .pick { pointer-events: none; }
+
+/* 铺子里带版本的客人 */
+.slot.ed-foil { box-shadow: 0 0 0 2px #9fb6cf, 0 3px 8px rgba(90, 66, 30, .2); }
+.slot.ed-holo { box-shadow: 0 0 0 2px #b9a3d6, 0 3px 8px rgba(90, 66, 30, .2); }
+.slot.ed-polychrome { box-shadow: 0 0 0 2px #f0c987, 0 3px 12px rgba(240, 201, 135, .35); }
+.slot.ed-negative { box-shadow: 0 0 0 2px #584a6b, 0 3px 8px rgba(90, 66, 30, .2); }
+.slot.has-ed .nm::after { content: ' ❖'; color: #8a6a3a; font-size: 11px; }
+
+@media (max-width: 1120px) {
+  :root { --card-w: 78px; --card-h: 110px; }
+  #patrons { min-height: 132px; gap: 8px; }
+  .patron { width: 96px; }
+  .readout .reel { font-size: 34px; }
+  .readout .total .reel { font-size: 44px; }
+  #trayWrap { grid-template-columns: 128px 1fr 160px; }
+}
+@media (max-height: 760px) {
+  :root { --card-h: 112px; --card-w: 80px; }
+  #patrons { min-height: 126px; }
+  .patron .blurb { min-height: 30px; }
+}
+
+/* ── 幕间：贵客进门 / 本场结清 ──────────────────────────────── */
+.curtain {
+  background: radial-gradient(ellipse at 50% 45%, rgba(22, 12, 5, .72), rgba(4, 3, 1, .93));
+  transition: opacity .45s var(--ease), backdrop-filter .45s var(--ease);
+}
+.curtain-inner {
+  text-align: center; padding: 26px 44px; max-width: min(560px, 86vw);
+  border-top: 1px solid rgba(201, 164, 76, .45);
+  border-bottom: 1px solid rgba(201, 164, 76, .45);
+  background: linear-gradient(180deg, rgba(46, 28, 12, .55), rgba(18, 11, 5, .55));
+}
+.curtain-kicker { font-size: 10px; letter-spacing: .42em; color: #b39a6d; margin-bottom: 6px; }
+.curtain-inner h2 {
+  margin: 0 0 8px; font-family: var(--display); font-size: 40px; font-weight: 400;
+  letter-spacing: .16em; color: #f6e6bf; text-shadow: 0 2px 18px rgba(255, 205, 120, .3);
+}
+.curtain-blurb { margin: 0 0 14px; font-size: 14px; font-style: italic; color: #d8c197; }
+#curtainLines { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
+#curtainLines .cl {
+  display: flex; justify-content: space-between; gap: 26px; font-size: 13px; color: #e8d6ae;
+  padding: 3px 8px; opacity: 0; transform: translateY(6px);
+  animation: lineIn .46s var(--ease-enter) forwards;
+}
+#curtainLines .cl b { color: #9fd8ac; font-family: var(--display); font-size: 15px; }
+#curtainLines .cl.sum { border-top: 1px solid rgba(201, 164, 76, .4); margin-top: 4px; padding-top: 6px; }
+/* 铺子里的货一件件摆上柜台，不是整块闪现 */
+#shopBody .slot { animation: slotIn .44s var(--ease-enter) both; }
+@keyframes slotIn {
+  0% { opacity: 0; transform: translateY(18px) scale(.975); }
+  70% { opacity: 1; transform: translateY(-2px) scale(1.004); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes lineIn { to { opacity: 1; transform: none; } }
+.curtain-hint { font-size: 10.5px; letter-spacing: .18em; color: #8a7a5f; }
+/* 幕布上那颗「继 续」：键盘之外要给眼睛一个落点。幕布本来就整块可点，按钮只是把这件事说出来 */
+.curtain-ok { margin: 4px 0 2px; padding: 9px 26px; font-size: 15px; }
+.curtain-hint kbd { font-family: var(--serif); padding: 1px 5px; border-radius: 3px; background: rgba(255, 255, 255, .1); border: 1px solid rgba(201, 164, 76, .3); }
+.overlay.curtain .crest.big { margin-bottom: 6px; }
+
+.resume-note { margin-top: 10px; font-size: 11.5px; color: #6a5540; font-style: italic; }
+#btnResume { background: linear-gradient(180deg, #6f9a78, #33573d 60%, #23402b); color: #f2ead4; }
+
+/* 图鉴 */
+.codex-row {
+  display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: baseline;
+  padding: 6px 0; border-bottom: 1px dotted rgba(120, 92, 50, .3); font-size: 12.5px; color: #34281a;
+}
+.codex-row .cn { font-size: 13.5px; }
+.codex-row .cl2 { font-size: 10.5px; color: #7a6039; grid-column: 1 / -1; }
+.codex-row .cv { font-family: var(--display); font-size: 14px; color: #245c36; min-width: 52px; text-align: right; }
+.codex-row .cx { font-family: var(--display); font-size: 14px; color: #8c2030; min-width: 34px; text-align: right; }
+.codex-row .ct { font-size: 10px; letter-spacing: .16em; color: #8a6a3a; min-width: 44px; text-align: right; }
+.codex-row.secret { background: rgba(140, 32, 48, .06); }
+.codex-row.secret .cn { color: #6e1420; }
+.codex-row.locked { opacity: .45; }
+.codex-h { font-size: 10px; letter-spacing: .3em; color: #7a6039; margin: 14px 0 4px; }
+
+/* ── 第 3 轮：衔接与反馈 ────────────────────────────────────── */
+/* ghost 是给暗底用的，落到纸面上就几乎看不见——面板里换成墨线按钮 */
+.panel .brass-btn.ghost {
+  color: #3a2a14;
+  background: linear-gradient(180deg, #fffaf0, #e2d2ae);
+  border: 1px solid rgba(120, 92, 50, .5);
+  box-shadow: 0 2px 5px rgba(90, 66, 30, .18);
+}
+.panel .brass-btn.ghost:hover { filter: brightness(1.05); }
+.panel .brass-btn.ghost:disabled { opacity: .45; }
+.slot.disabled { opacity: .62; }
+.slot.disabled .de, .slot.disabled .pr { color: #6a5540; }
+
+/* 发牌逐张开手，不是一整把同时弹进来 */
+#tray .card.dealing { animation-delay: calc(var(--i, 0) * 55ms); }
+
+/* 客人入席：从虚席站起来，末尾轻轻一欠身；离席：起身、往后退、淡出 */
+.patron { animation: takeSeat .55s var(--ease-bow) both; }
+@keyframes takeSeat {
+  0% { opacity: 0; transform: translateY(18px) scale(.92); }
+  62% { opacity: 1; transform: translateY(-2px) scale(1.012); }
+  100% { opacity: 1; transform: none; }
+}
+.patron.leaving { animation: leaveSeat .46s var(--ease-leave) forwards; }
+@keyframes leaveSeat {
+  0% { opacity: 1; transform: none; }
+  28% { opacity: 1; transform: translateY(-3px) scale(1.015); }
+  100% { opacity: 0; transform: translateY(22px) scale(.92); }
+}
+
+/* ── 开局选签名宾：五张候选摆成一排 ─────────────────────────── */
+.draftbox { margin-top: 14px; }
+.draftbox.hidden { display: none; }
+.draft-head { display: flex; align-items: center; gap: 12px; }
+.draft-head .lbl2 { font-size: 10px; letter-spacing: .24em; color: #b39a6d; }
+#btnReroll { margin-left: auto; font-size: 11px; padding: 3px 10px; }
+.draft-row { display: flex; gap: 8px; margin-top: 8px; }
+.draft-card {
+  flex: 1 1 0; min-width: 0; text-align: left; cursor: pointer;
+  padding: 9px 10px 10px; border-radius: 5px;
+  background: linear-gradient(180deg, rgba(255, 250, 235, .07), rgba(0, 0, 0, .22));
+  border: 1px solid rgba(201, 164, 76, .28);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .38);
+  transition: transform .22s var(--ease), border-color .22s var(--ease),
+              box-shadow .22s var(--ease), background-color .22s var(--ease);
+}
+.draft-card:hover { transform: translateY(-3px); border-color: rgba(201, 164, 76, .6); }
+.draft-card.on {
+  border-color: var(--brass); background: linear-gradient(180deg, rgba(232, 199, 107, .17), rgba(120, 84, 12, .2));
+  box-shadow: 0 0 0 1px rgba(232, 199, 107, .4), 0 6px 16px rgba(0, 0, 0, .5);
+}
+.draft-card > * { display: block; }
+.draft-card .dc-mono {
+  width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 50%;
+  font-family: var(--display); font-size: 13px; color: #f6ecd6;
+  background: radial-gradient(circle at 50% 35%, #3c2a15, #17100a 74%);
+  border: 1px solid var(--edge, rgba(201, 164, 76, .5));
+}
+.draft-card .dc-name { margin-top: 6px; font-size: 12px; color: #f6ecd6; line-height: 1.25; }
+.draft-card .dc-temper { margin-top: 3px; font-size: 9px; letter-spacing: .14em; }
+.draft-card .dc-blurb { margin-top: 4px; font-size: 9.5px; line-height: 1.4; color: #a89272; font-style: italic; }
+/* 脾气用颜色分开：靠脑子＝青，稳吃＝金，吃运气＝红。选单一眼看得出打法不同 */
+.draft-card.t-head .dc-temper { color: #8fb6c9; }
+.draft-card.t-hand .dc-temper { color: var(--gold-leaf); }
+.draft-card.t-heart .dc-temper { color: #d98b95; }
+.draft-card.r-rare { --edge: var(--brass); }
+.draft-card.r-legendary { --edge: #d7bc73; }
+.draft-note { margin: 7px 0 0; font-size: 10.5px; font-style: italic; color: #8a7a5f; }
+
+/* ── 随机事件：三张候选并排摆在这张纸上 ─────────────────────
+   卡片用的是纸面那套 ivory/ink，不是牌桌那套深绿——它出现在"文书"这一层。
+   脾气分色沿用选签名宾那五张的语汇（青＝靠脑子，金＝稳吃，红＝吃运气），
+   玩家在两处看到的"这条要不要赌"是同一个颜色语言。 */
+.ev-row { display: flex; gap: 12px; margin: 4px 0 14px; text-align: left; }
+.ev-card {
+  flex: 1 1 0; min-width: 0; cursor: pointer; text-align: left; font: inherit;
+  padding: 12px 12px 11px; border-radius: 6px; color: var(--ink);
+  background: linear-gradient(180deg, #fffaf0, #eadfc2);
+  border: 1px solid rgba(120, 92, 50, .42);
+  box-shadow: 0 3px 10px rgba(90, 66, 30, .22);
+  animation: slotIn .44s var(--ease-enter) both;
+  transition: transform .22s var(--ease), border-color .22s var(--ease),
+              box-shadow .22s var(--ease);
+}
+.ev-card:hover { transform: translateY(-3px); border-color: var(--brass); box-shadow: 0 8px 18px rgba(90, 66, 30, .3); }
+.ev-card:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.ev-card > * { display: block; }
+.ev-card .ev-glyph { width: 30px; height: 30px; color: #5a4526; }
+.ev-card .ev-glyph svg { width: 100%; height: 100%; display: block; }
+.ev-card .ev-name { margin-top: 8px; font-family: var(--display); font-size: 17px; letter-spacing: .04em; color: #2f2210; line-height: 1.2; }
+.ev-card .ev-risk { margin-top: 3px; font-size: 9.5px; letter-spacing: .18em; }
+.ev-card .ev-kicker { margin-top: 7px; font-size: 11px; line-height: 1.45; font-style: italic; color: #6a5540; }
+.ev-card .ev-blurb {
+  margin-top: 7px; padding-top: 7px; font-size: 11px; line-height: 1.5; color: #3c2d18;
+  border-top: 1px dashed rgba(120, 92, 50, .35);
+}
+.ev-card.r-head .ev-risk { color: #2f5d74; }
+.ev-card.r-hand .ev-risk { color: #8a6a18; }
+.ev-card.r-heart .ev-risk { color: #9b3b3b; }
+.ev-card.r-head { border-top: 2px solid rgba(47, 93, 116, .55); }
+.ev-card.r-hand { border-top: 2px solid rgba(138, 106, 24, .55); }
+.ev-card.r-heart { border-top: 2px solid rgba(155, 59, 59, .55); }
+#eventPick .deed { width: min(760px, 92vw); }
+#eventNote { margin: 0 0 16px; font-size: 11px; font-style: italic; color: #6a5540; }
+/* 结算幕的「事件回顾」：一行一夜，左边夜次与事件名，右边当时实际发生了什么 */
+.event-recap { margin: 0 auto 18px; max-width: 470px; text-align: left; }
+.event-recap.hidden { display: none; }
+.event-recap .lbl2 { font-size: 10px; letter-spacing: .24em; color: #8a6a18; margin-bottom: 7px; }
+#eventRecap .er-row { display: flex; gap: 10px; font-size: 11.5px; line-height: 1.5; color: #3c2d18; }
+#eventRecap .er-night { font-family: var(--display); color: #8a6a18; min-width: 42px; }
+#eventRecap .er-what { flex: 1 1 0; min-width: 0; }
+#eventRecap .er-what i { display: block; color: #6a5540; font-size: 10.5px; }
+
+/* ── 剪影肖像：内联 SVG，无外部素材 ───────────────────────────
+   肖像本身只画形状，颜色由 SVG 内的 style 给（罕见度调色板）；
+   这里管尺寸、裁切与"被请走时压暗"这类状态。 */
+.patron .cameo .pf-w { position: absolute; inset: 1px; display: block; }
+.patron .cameo svg.pf, .dc-pf svg.pf, .slot-pf svg.pf {
+  width: 100%; height: 100%; display: block; overflow: visible;
+}
+/* 字母刻印退到右下角，不再占满整个椭圆 */
+.patron .cameo .mono {
+  position: absolute; right: 3px; bottom: 1px; inset: auto;
+  display: block; font-family: var(--display); font-size: 9px; letter-spacing: .04em;
+  color: rgba(255, 240, 200, .62); text-shadow: 0 1px 1px rgba(0, 0, 0, .8);
+}
+.patron:hover .cameo .mono { color: rgba(255, 245, 215, .9); }
+/* 版本的光：箔面冷、全相透、三彩流动——都只加一层，不改肖像形状 */
+.patron.ed-foil .cameo::before {
+  content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(120deg, rgba(159,182,207,.28), transparent 45%, rgba(159,182,207,.2));
+}
+.patron.ed-holo .cameo::before {
+  content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(125deg, rgba(185,163,214,.3), rgba(120,200,220,.16) 60%);
+}
+.patron.ed-polychrome .cameo::before {
+  content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(125deg, rgba(240,201,135,.32), rgba(230,120,150,.18) 40%, rgba(120,200,220,.2) 75%);
+}
+/* 请走后压暗、以及候选卡的小像 */
+.patron.leaving .cameo { filter: grayscale(.6) brightness(.8); }
+/* 候选卡上的小像：跟着肖像自己的比例做横椭圆。
+   原来是 34×34 的正圆，96×44 的画面塞进去只能占中间一条，人小得像贴纸。 */
+.dc-pf {
+  display: block; width: 100%; height: 44px; border-radius: 50% / 42%;
+  background: radial-gradient(circle at 50% 34%, #6d5330, #3a2414 74%);
+  border: 1px solid var(--edge, rgba(201,164,76,.45)); overflow: hidden; margin-bottom: 5px;
+}
+.slot-pf {
+  position: absolute; right: 8px; top: 8px; width: 48px; height: 23px;
+  border-radius: 50% / 42%; overflow: hidden; opacity: .95;
+  background: radial-gradient(circle at 50% 34%, #6d5330, #3a2414 74%);
+  border: 1px solid rgba(120,92,50,.4);
+}
+.slot.has-ed .slot-pf { border-color: var(--edge); }
+
+/* 新功能的小件：tag 刻字、长进、换座箭头、套装与弃牌堆 */
+.patron .tagchip {
+  display: block; font-size: 8.5px; letter-spacing: .12em; color: #c9a44c;
+  text-align: center; margin-top: 3px; min-height: 10px;
+}
+.patron .growchip {
+  display: block; font-size: 8.5px; font-style: italic; color: #8fae86;
+  text-align: center; min-height: 10px;
+}
+.patron .shift { display: block; text-align: center; margin-top: 2px; }
+.patron .mv {
+  width: 18px; height: 18px; padding: 0; font-size: 9px; cursor: pointer; color: #e9dcbb;
+  background: linear-gradient(180deg, #4a3c22, #2c2213);
+  border: 1px solid rgba(201, 164, 76, .45); border-radius: 3px;
+}
+.patron .mv:hover:not(:disabled) { filter: brightness(1.25); }
+.patron .mv:disabled { opacity: .25; cursor: default; }
+.sets-box, .discard-box {
+  margin-top: 16px; padding: 11px 13px; border-radius: 6px;
+  background: linear-gradient(180deg, rgba(201, 164, 76, .1), rgba(201, 164, 76, .03));
+  border: 1px solid rgba(120, 92, 50, .35);
+}
+.sets-box h4, .discard-box h4 { margin: 0 0 7px; font-size: 12px; letter-spacing: .2em; color: #6e5a2f; }
+.set-line { font-size: 11.5px; color: #3a2a14; padding: 2px 0; }
+.sets-none { font-size: 11px; font-style: italic; color: #8a7a5f; margin: 0; }
+.d-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2b2117; padding: 3px 0; }
+.d-row .d-e { flex: 1 1 auto; font-size: 10.5px; color: #6a5540; font-style: italic; }
+.d-row .small { font-size: 10.5px; padding: 3px 8px; }
+
+/* 银钱进账：一枚几尼从进账处飞向左上角钱袋 */
+.fly {
+  position: fixed; z-index: 80; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; color: #4a3208; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #fbe9b4, #dcb653 62%, #a8801f);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .55), inset 0 -2px 3px rgba(90, 60, 10, .5);
+  animation: flyToPurse .78s linear forwards;
+}
+/* 硬币要先弹起来、再被"吸"进钱袋越落越快，最后一下缩进袋口。
+   一根曲线跑完全程的话，它更像在滑而非在掉。 */
+@keyframes flyToPurse {
+  0% { transform: translate(0, 0) scale(.62); opacity: 0; animation-timing-function: cubic-bezier(.1,.8,.3,1); }
+  14% { transform: translate(var(--dx0), var(--dy0)) scale(1.16); opacity: 1;
+       animation-timing-function: cubic-bezier(.5,.02,.86,.42); }
+  72% { transform: translate(calc(var(--dx1) * .82), calc(var(--dy1) * .62)) scale(.92); opacity: 1;
+       animation-timing-function: cubic-bezier(.2,.78,.28,1); }
+  100% { transform: translate(var(--dx1), var(--dy1)) scale(.42); opacity: .55; }
+}
+
+/* 抬注的筹码堆：层数直接堆出高度，按下就有物理反馈 */
+.chips-stack { display: flex; align-items: flex-end; gap: 3px; height: 26px; margin-left: auto; }
+.chips-stack i {
+  width: 13px; border-radius: 2px; background: linear-gradient(180deg, #b8404d, #7c1a27);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .28) inset, 0 -1px 0 rgba(0, 0, 0, .4) inset;
+  transition: height .3s var(--ease);
+}
+.chips-stack i.on { height: var(--h, 8px); }
+.chips-stack i.off { height: 3px; opacity: .35; }
+
+/* 结清收口：总数字的一个重音 */
+.readout .total .reel.pop { animation: popTotal .5s var(--ease-out); }
+@keyframes popTotal {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+
+/* ── 设置面板 ───────────────────────────────────────────────── */
+.set-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 0; border-bottom: 1px dotted rgba(120, 92, 50, .3); }
+.set-row .sl { flex: 1 1 auto; font-size: 13px; color: #34281a; }
+.set-row .sd { font-size: 10.5px; color: #7a6039; font-style: italic; display: block; margin-top: 2px; }
+/* 八首曲子并排会顶破一行，所以允许换行；换行后靠右对齐，读起来还是一"排"选项 */
+.seg { display: flex; flex-wrap: wrap; justify-content: flex-end; border: 1px solid rgba(120, 92, 50, .45); border-radius: 4px; overflow: hidden; }
+.seg button {
+  font-family: var(--serif); font-size: 12px; padding: 5px 11px; cursor: pointer; border: 0;
+  background: linear-gradient(180deg, #fffaf0, #e6d8b8); color: #3a2a14;
+  border-right: 1px solid rgba(120, 92, 50, .28);
+}
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: linear-gradient(180deg, #3a5c40, #22412a); color: #f4e8c8; }
+.danger { color: #8c2030; }
+
+/* ── 减少动效：用户偏好或设置里手动开 ───────────────────────── */
+html[data-calm='1'] *, html[data-calm='1'] *::before, html[data-calm='1'] *::after {
+  animation-duration: .001s !important;
+  animation-delay: 0s !important;
+  transition-duration: .08s !important;
+  transition-delay: 0s !important;
+}
+html[data-calm='1'] #light { animation: none !important; }
+html[data-calm='1'] .card.e-glass::after { animation: none !important; background-position: 40% 0; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001s !important;
+    animation-delay: 0s !important;
+    transition-duration: .08s !important;
+  }
+}
+
+/* ══ 风格层：只改令牌与少数装饰规则，切换风格不动结构、不动逻辑 ══
+   A 默认 = 维多利亚牌局（绿呢 + 胡桃木 + 象牙 + 黄铜）
+   B deco = 装饰艺术（黑漆 + 金线几何 + 大写无衬线）
+   C engraving = 铜版画（米纸 + 密集排线 + 单色墨）
+   D leather = 暖调写实（深皮革 + 强烛光 + 厚阴影） */
+
+/* ── B · Art Deco ─────────────────────────────────────────── */
+html[data-style='deco'] {
+  --wood-1: #14100c; --wood-2: #1d1712; --wood-3: #0a0806;
+  --felt-1: #101519; --felt-2: #06090b; --felt-3: #1a2228;
+  --ivory: #f2e7cf; --ivory-2: #d9c9a4;
+  --brass: #d8b44a; --brass-hi: #f7e6a8; --brass-lo: #8a6a12;
+  --gold-leaf: #e9c765; --oxblood: #b03040; --ink-blue: #3f6f9c;
+  --serif: "Futura", "Avenir Next", "Helvetica Neue", sans-serif;
+  --display: "Didot", "Bodoni 72", "Futura", sans-serif;
+}
+html[data-style='deco'] #stage { background: linear-gradient(180deg, #0b0d10, #14100c 60%, #07080a); }
+html[data-style='deco'] .felt {
+  border-width: 10px;
+  border-image: repeating-linear-gradient(90deg, #d8b44a 0 2px, transparent 2px 9px, #d8b44a 9px 11px, transparent 11px 20px) 10;
+  background:
+    repeating-linear-gradient(45deg, rgba(216, 180, 74, .05) 0 6px, transparent 6px 12px),
+    radial-gradient(120% 100% at 50% 0%, #1e262c, #0a0d10);
+  border-radius: 0;
+}
+html[data-style='deco'] .card { border-radius: 2px; background: linear-gradient(180deg, #f6ecd6, #e2d2ac); }
+html[data-style='deco'] .card::before { inset: 5px; border-radius: 0; border: 1px solid rgba(90, 70, 20, .35); }
+html[data-style='deco'] .patron { border-radius: 0; background: linear-gradient(180deg, #1f1a13, #0d0a07); }
+html[data-style='deco'] .patron .cameo { border-radius: 0; clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%); }
+html[data-style='deco'] .deed { border-radius: 0; }
+html[data-style='deco'] .night, html[data-style='deco'] .stake b { letter-spacing: .34em; text-transform: uppercase; }
+
+/* ── C · 铜版画 ───────────────────────────────────────────── */
+html[data-style='engraving'] {
+  --wood-1: #6b5a3e; --wood-2: #7d6b4a; --wood-3: #4c3f2a;
+  --felt-1: #cbbb95; --felt-2: #a89672; --felt-3: #ddd0ac;
+  --ivory: #f6f1e2; --ivory-2: #e6dcc4;
+  --ink: #241d14; --ink-soft: #4a3f2d;
+  --brass: #7a6636; --brass-hi: #b9a274; --brass-lo: #4c3f22;
+  --gold-leaf: #3a2f1c; --oxblood: #4a2020; --ink-blue: #2c3a4c;
+  --serif: "Baskerville", "Palatino", serif;
+}
+html[data-style='engraving'] #stage { background: #ded2b2; }
+html[data-style='engraving'] #light {
+  background:
+    repeating-linear-gradient(0deg, rgba(60, 46, 24, .10) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(60, 46, 24, .06) 0 1px, transparent 1px 5px);
+  animation: none; mix-blend-mode: multiply; opacity: .9;
+}
+html[data-style='engraving'] .felt {
+  border-width: 7px;
+  border-image: repeating-linear-gradient(90deg, #5c4c30 0 3px, #ded2b2 3px 6px) 7;
+  background:
+    repeating-linear-gradient(38deg, rgba(70, 55, 30, .13) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 100% at 50% 0%, #e8dcbd, #c3b28a);
+}
+html[data-style='engraving'] .card {
+  background: #f8f4e8; border-radius: 3px;
+  box-shadow: 0 0 0 1px #3a2f1c, 0 3px 0 rgba(58, 47, 28, .18);
+}
+html[data-style='engraving'] .card .pip, html[data-style='engraving'] .card .face .ltr { opacity: .82; }
+html[data-style='engraving'] .patron { background: linear-gradient(180deg, #efe6cd, #d8caa6); border-color: #4c3f22; }
+html[data-style='engraving'] .patron .pname, html[data-style='engraving'] .patron .blurb { color: #2c2417; }
+html[data-style='engraving'] .patron .cameo { background: repeating-linear-gradient(0deg, #b7a680 0 1px, #d8caa6 1px 3px); }
+html[data-style='engraving'] .readout .chips .reel { color: #2c3a4c; text-shadow: none; }
+html[data-style='engraving'] .readout .mult .reel { color: #4a2020; text-shadow: none; }
+html[data-style='engraving'] .readout .total .reel { color: #241d14; text-shadow: none; }
+
+/* ── D · 暖调皮革 ─────────────────────────────────────────── */
+html[data-style='leather'] {
+  --wood-1: #2a1a12; --wood-2: #3d2718; --wood-3: #180e08;
+  --felt-1: #4a2418; --felt-2: #24100a; --felt-3: #6b3520;
+  --ivory: #f7eddb; --ivory-2: #e4d3b2;
+  --brass: #c98f3a; --brass-hi: #f6d79a; --brass-lo: #7a4a12;
+  --gold-leaf: #f0c878;
+}
+html[data-style='leather'] #stage { background: radial-gradient(120% 90% at 50% -8%, #3a2113, #150a05 60%, #080402); }
+html[data-style='leather'] #light {
+  background:
+    radial-gradient(46% 36% at 50% 4%, rgba(255, 190, 110, .30), transparent 70%),
+    radial-gradient(ellipse at 50% 50%, transparent 34%, rgba(0, 0, 0, .68) 100%);
+}
+html[data-style='leather'] .felt {
+  border-width: 12px;
+  border-image: repeating-linear-gradient(96deg, rgba(0,0,0,.35) 0 2px, transparent 2px 5px), linear-gradient(180deg, #4a2c18, #241008) 12;
+  background:
+    radial-gradient(100% 80% at 50% 0%, rgba(255, 200, 130, .16), transparent 60%),
+    radial-gradient(120% 100% at 50% 0%, var(--felt-3), var(--felt-1) 45%, var(--felt-2));
+  box-shadow: 0 0 90px rgba(0, 0, 0, .72) inset, 0 16px 40px rgba(0, 0, 0, .6);
+}
+html[data-style='leather'] .card { box-shadow: 0 0 0 1px rgba(60, 34, 12, .6), 0 12px 22px rgba(0, 0, 0, .62); }
+html[data-style='leather'] .patron { background: linear-gradient(180deg, #4a2c18, #241008); box-shadow: 0 10px 22px rgba(0, 0, 0, .6); }
+html[data-style='leather'] .readout .total .reel { text-shadow: 0 0 34px rgba(255, 190, 110, .55); }
+
+/* ── 牌面审片档（?cards=1）────────────────────────────────────
+   把 52 张牌面一次摆出来：点位排布、人头纹章、四套画法下的色，
+   一眼能比。走的是生产那套 syncCard，不是另画一份假牌面。 */
+html[data-sheet='1'] { --card-w: 62px; --card-h: 88px; }
+html[data-sheet='1'] #board, html[data-sheet='1'] #trayWrap,
+html[data-sheet='1'] #patrons, html[data-sheet='1'] .hint { display: none; }
+html[data-sheet='1'] #app { padding-top: 12px; }
+.cardsheet { display: none; }
+html[data-sheet='1'] .cardsheet {
+  display: grid; grid-template-columns: repeat(13, 1fr); gap: 7px 6px;
+  padding: 14px 18px; margin: 8px auto; width: min(1180px, 96vw);
+}
+html[data-sheet='1'] .card { cursor: default; }
+
+/* ── 牌背 ────────────────────────────────────────────────────
+   扣过来看的那一面（抽牌仪式用）。底色压在 .card 的纸面之上，
+   菱格与徽记全走 currentColor：四套画法只换色，不换形。 */
+/* 底子是牌桌那层深绿（--felt-* 每套画法各自给色），菱格与徽记走黄铜：
+   这才是"烫金牌背"，不是"米色卡上撒了张网"。
+   菱格走 CSS 而不是 SVG <pattern>：平铺要 id，六张牌就有六个同名 id，引用只认文档里第一个，
+   抽掉一张其余的纹样会跟着变。CSS 这层还自动跟着圆角裁、跟着 currentColor 换色。 */
+.card.back {
+  color: var(--brass);
+  background: linear-gradient(160deg, var(--felt-3), var(--felt-1) 55%, var(--felt-2));
+}
+.card.back::after {
+  content: ''; position: absolute; inset: 4px; z-index: 1; border-radius: 4px;
+  pointer-events: none; opacity: .3;
+  background:
+    radial-gradient(currentColor 1.1px, transparent 1.4px) 7px 7px / 14px 14px,
+    repeating-linear-gradient(45deg, currentColor 0 .8px, transparent .8px 9.9px),
+    repeating-linear-gradient(-45deg, currentColor 0 .8px, transparent .8px 9.9px);
+}
+.card.back > .backart { position: absolute; inset: 0; z-index: 2; display: block; }
+.card.back > .backart svg { width: 100%; height: 100%; display: block; }
+/* 翻面：绕竖轴转半圈，转到侧面那一瞬由 main.ts 换成正面（用独立的 rotate/scale 属性，
+   扇形摆位用的 transform 才不会被动画顶掉） */
+@keyframes cardTurn {
+  from { rotate: y 0deg; }
+  50% { rotate: y 90deg; scale: 1.04; }
+  to { rotate: y 0deg; }
+}
+
+/* ── 抽牌礼那一排扣过来的牌 ───────────────────────────────────
+   比手牌小一号：六张要摆进一张地契里。扇形与手牌用同一套 --rot/--base。 */
+.fan-row {
+  --card-w: 78px; --card-h: 110px;
+  display: flex; justify-content: center; align-items: flex-end;
+  gap: 6px; min-height: calc(var(--card-h) + 26px);
+  margin: 2px 0 14px; perspective: 900px;
+}
+.fan-row .card {
+  transform: translateY(var(--base, 0px)) rotate(var(--rot, 0deg));
+  /* 入场用 translate/opacity 这两个独立属性（fill-mode 只 backwards）：
+     写成 transform 的关键帧会把上面的扇形摆位顶掉， forwards 还会把 opacity 锁死、dim 不动 */
+  animation: fanIn .46s var(--ease-enter) backwards;
+  transition: transform .22s var(--ease), box-shadow .22s var(--ease), opacity .22s var(--ease);
+}
+@keyframes fanIn {
+  from { opacity: 0; translate: 0 18px; }
+  to { opacity: 1; translate: 0 0; }
+}
+.fan-row .card:hover {
+  transform: translateY(calc(var(--base, 0px) - 16px)) rotate(var(--rot, 0deg));
+  box-shadow: 0 2px 0 rgba(255, 255, 255, .5) inset, 0 0 0 1px var(--brass),
+              0 14px 26px rgba(0, 0, 0, .55);
+}
+.fan-row .card.drawn {
+  box-shadow: 0 2px 0 rgba(255, 255, 255, .5) inset, 0 0 0 2px var(--brass),
+              0 16px 30px rgba(0, 0, 0, .6);
+}
+/* 抽定之后其余几张退到暗处：眼睛只跟着翻过来的那一张走 */
+.fan-row.locked .card:not(.drawn) { opacity: .4; }
