@@ -1,7 +1,7 @@
 #!/bin/bash
 # 上架前自检：每一条都是能跑红的实测，不是给人看的清单。
 # 用法：bash tools/preflight.sh          （检查本地构建）
-#       RELEASE=1 bash tools/preflight.sh （额外检查沙盒与发布签名）
+#       CHANNEL=developer-id 或 CHANNEL=app-store 检查对应发布签名。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -15,7 +15,7 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; pass_n=$((pass_n + 1)); }
 no()   { printf '  \033[31m✗\033[0m %s\n' "$1"; fails=$((fails + 1)); }
 warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
 
-[[ -d $APP ]] || { echo "没有 $APP，先跑 build-app.sh"; exit 1; }
+[[ -d $APP ]] || { echo "没有 ${APP}，先跑 build-app.sh"; exit 1; }
 
 echo "包体结构"
 [[ -f "$APP/Contents/MacOS/Guinea" ]] && ok "可执行文件在位" || no "缺可执行文件"
@@ -59,8 +59,8 @@ if [[ -f dist/icon-1024-opaque.png ]]; then
 import struct,sys
 d=open('dist/icon-1024-opaque.png','rb').read(33)
 W,H=struct.unpack('>II',d[16:24]); print(W,H,d[25])" 2>/dev/null)
-  [[ "$w" == "1024" && "$h" == "1024" ]] && ok "上架图 1024×1024" || no "上架图尺寸 $w×$h，要 1024×1024"
-  [[ "$ct" == "2" ]] && ok "上架图无 alpha 通道（颜色类型 2 = RGB）" || no "上架图带 alpha（颜色类型 $ct），会被拒"
+  [[ "$w" == "1024" && "$h" == "1024" ]] && ok "上架图 1024×1024" || no "上架图尺寸 ${w}×${h}，要 1024×1024"
+  [[ "$ct" == "2" ]] && ok "上架图无 alpha 通道（颜色类型 2 = RGB）" || no "上架图带 alpha（颜色类型 ${ct}），会被拒"
 else
   no "缺 dist/icon-1024-opaque.png"
 fi
@@ -116,7 +116,7 @@ for l in zh-Hans en; do
 done
 cat_ok=$(plutil -extract LSApplicationCategoryType raw "$PLIST" 2>/dev/null)
 case " public.app-category.card-games public.app-category.board-games public.app-category.games public.app-category.puzzle-games public.app-category.strategy-games " in
-  *" $cat_ok "*) ok "分类合法（$cat_ok）";;
+  *" $cat_ok "*) ok "分类合法（${cat_ok}）";;
   *) no "分类不在已知列表里：${cat_ok:-空}";;
 esac
 # 只查随包发布的 House 目标：SandboxProbe 是诊断工具，它存在的意义就是复现私有 KVC 那条路
@@ -124,8 +124,8 @@ priv=$(grep -rn "setValue(.*forKey:\|value(forKey:" shell/Sources/House 2>/dev/n
 [[ -z "$priv" ]] && ok "外壳没有对私有键做 KVC（审核驳回点）" || no "发现私有 KVC：$priv"
 archs_all=$(lipo -archs "$APP/Contents/MacOS/Guinea" 2>/dev/null || echo "")
 case "$archs_all" in
-  *arm64*x86_64*|*x86_64*arm64*) ok "通用二进制（$archs_all）";;
-  *arm64*) warn "只有 arm64（$archs_all）：Intel 机型装不上";;
+  *arm64*x86_64*|*x86_64*arm64*) ok "通用二进制（${archs_all}）";;
+  *arm64*) warn "只有 arm64（${archs_all}）：Intel 机型装不上";;
   *) no "架构异常：${archs_all:-读不到}";;
 esac
 
@@ -133,7 +133,7 @@ echo
 echo "构建卫生"
 if grep -rq "$HOME" "$RES/web" 2>/dev/null; then no "资源里泄漏了构建机绝对路径"; else ok "无构建机路径泄漏"; fi
 archs=$(lipo -archs "$APP/Contents/MacOS/Guinea" 2>/dev/null || echo "")
-case "$archs" in *arm64*) ok "含 arm64（$archs）";; *) no "缺 arm64（实测：${archs:-读不到}）";; esac
+case "$archs" in *arm64*) ok "含 arm64（${archs}）";; *) no "缺 arm64（实测：${archs:-读不到}）";; esac
 sigout=$(codesign --verify --strict --verbose=2 "$APP" 2>&1 || true)
 case "$sigout" in
   *"valid on disk"*|*"satisfies its Designated Requirement"*) ok "签名校验通过（strict）";;
@@ -153,19 +153,26 @@ echo
 echo "内核门禁（上架前必须全绿）"
 node core/selftest.ts >/dev/null 2>&1 && ok "selftest 通过" || no "selftest 失败"
 node core/fuzz.ts >/dev/null 2>&1 && ok "不变量穷举通过" || no "穷举发现违反"
-if [[ "${RELEASE:-0}" == "1" ]]; then
+CHANNEL="${CHANNEL:-$(plutil -extract GuineaDistributionChannel raw "$PLIST" 2>/dev/null || echo local)}"
+if [[ "${RELEASE:-0}" == "1" && "$CHANNEL" == "local" ]]; then CHANNEL=developer-id; fi
+case "$CHANNEL" in local|developer-id|app-store) ;; *) no "未知分发渠道 ${CHANNEL}"; exit 1;; esac
+ent=$(codesign -d --entitlements :- "$APP" 2>/dev/null || true)
+sig=$(codesign -dvv "$APP" 2>&1 || true)
+if [[ "$CHANNEL" != "local" ]]; then
   echo
   echo "发布模式附加检查"
   plutil -lint shell/House.entitlements >/dev/null 2>&1 && ok "entitlements 语法合法" || no "entitlements 语法错"
-  plutil -extract com.apple.security.app-sandbox raw shell/House.entitlements 2>/dev/null | grep -q true \
-    && ok "App Sandbox 已开" || no "沙盒未开（App Store 必需）"
-  ent=$(codesign -d --entitlements :- "$APP" 2>/dev/null)
-  case "$ent" in *app-sandbox*) ok "产物已带沙盒 entitlement";; *) no "产物未带沙盒 entitlement（用 RELEASE=1 重签）";; esac
-  case "$(codesign -dvv "$APP" 2>&1 || true)" in
-    *"Authority=Developer ID"*) ok "Developer ID 签名";; *) warn "非 Developer ID 签名（本机 ad-hoc 属正常）";; esac
+  case "$sig" in *runtime*) ok "硬化运行时已启用";; *) no "发布产物未开启硬化运行时";; esac
+  if [[ "$CHANNEL" == "app-store" ]]; then
+    case "$ent" in *app-sandbox*) ok "App Store 产物带沙盒 entitlement";; *) no "App Store 产物缺少沙盒";; esac
+    case "$sig" in *"Authority=Apple Distribution"*|*"Authority=3rd Party Mac Developer Application"*) ok "App Store 分发签名";; *) no "App Store 分发签名不匹配";; esac
+  else
+    case "$ent" in *app-sandbox*) no "Developer ID 产物不应启用沙盒";; *) ok "Developer ID 产物未启用沙盒";; esac
+    case "$sig" in *"Authority=Developer ID Application"*) ok "Developer ID 签名";; *) no "缺少 Developer ID Application 签名";; esac
+  fi
 fi
 
 echo
 echo "─────"
 echo "通过 $pass_n 项，失败 $fails 项"
-if [[ $fails -eq 0 ]]; then echo "PREFLIGHT OK：可以提交审核"; else echo "PREFLIGHT FAIL"; exit 1; fi
+if [[ $fails -eq 0 ]]; then echo "PREFLIGHT OK：${CHANNEL} 构建检查通过（不代表公证或审核已完成）"; else echo "PREFLIGHT FAIL"; exit 1; fi

@@ -15,10 +15,19 @@ export function mulberry32(seed: number): () => number {
 
 export class Rand {
   private r: () => number;
+  private seed: number;
   public calls = 0;
 
   constructor(seed: number) {
+    this.seed = seed >>> 0;
     this.r = mulberry32(seed);
+  }
+
+  /** mulberry32 每步只把内部状态加一个常数，可精确跳到任意安全整数步数。 */
+  restoreCalls(calls: number): void {
+    if (!Number.isSafeInteger(calls) || calls < 0) throw new RangeError('随机步数不合法');
+    this.r = mulberry32((this.seed + Math.imul(calls >>> 0, 0x6d2b79f5)) >>> 0);
+    this.calls = calls;
   }
 
   next(): number {

@@ -19,9 +19,9 @@ function emit(src, dest) {
   //   web/main.ts 里的 '../core/x.ts' 落到 gen/core/x.js
   //   core/*.ts 之间的 './x.ts' 留在同目录
   const js = stripTypeScriptTypes(code, { mode: 'strip' })
-    .replace(/(\bfrom\s*['"])\.\.\/core\/([\w.]+)\.ts(['"])/g, '$1./core/$2.js$3')
-    .replace(/(\bfrom\s*['"])\.\/core\/([\w.]+)\.ts(['"])/g, '$1./core/$2.js$3')
-    .replace(/(\bfrom\s*['"])\.\/([\w.]+)\.ts(['"])/g, '$1./$2.js$3');
+    .replace(/(\bfrom\s*['"])\.\.\/core\/([\w.-]+)\.ts(['"])/g, '$1./core/$2.js$3')
+    .replace(/(\bfrom\s*['"])\.\/core\/([\w.-]+)\.ts(['"])/g, '$1./core/$2.js$3')
+    .replace(/(\bfrom\s*['"])\.\/([\w.-]+)\.ts(['"])/g, '$1./$2.js$3');
   writeFileSync(dest, js);
   return js.length;
 }

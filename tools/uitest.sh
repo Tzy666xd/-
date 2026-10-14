@@ -11,7 +11,7 @@ KEYS_PREFS="guinea.prefs.v1"
 SAVE="guinea.save.v1"
 export NODE_NO_WARNINGS=1
 
-[[ -x "$BIN" ]] || { echo "找不到 $BIN，先跑 build-app.sh"; exit 2; }
+[[ -x "$BIN" ]] || { echo "找不到 ${BIN}，先跑 build-app.sh"; exit 2; }
 [[ -f "$JS" ]] || { echo "缺少 $JS"; exit 2; }
 
 node tools/build-web.mjs --quiet || { echo "前端构建失败"; exit 1; }
@@ -115,9 +115,14 @@ read -r ASLEEP ACTIVE <<< "$DISP"
 # 但 CoreGraphics 那个信号只是必要条件：2026-10-11 连着遇到"报醒着、动画却一步不走"
 # （跳过演出 -1ms、性能档某手锁 16 秒）。所以再问一次时钟本身——
 # 真跑一根 150ms 的 WAAPI 动画，看它能不能自己完成。这条才是判据。
-CLOCK=$("$BIN" --uitest tools/clock-probe.js --boot "$BOOT_EMPTY" --query 'snap=0' \
-  --uitest-timeout 12 --delay 200 --window 1400x860 2>/dev/null | grep -o 'CLOCK [A-Z]*' | head -1)
-echo "环境探针：动画时钟 $CLOCK（实测一根 150ms 动画能不能自己跑完）"
+if [[ "${UITEST_CLOCK_STATE:-}" == "CLOCK STUCK" || "${UITEST_CLOCK_STATE:-}" == "CLOCK OK" ]]; then
+  CLOCK="$UITEST_CLOCK_STATE"
+  echo "时钟探针：复用本批次刚实测的结果（${CLOCK}）"
+else
+  CLOCK=$("$BIN" --uitest tools/clock-probe.js --boot "$BOOT_EMPTY" --query 'snap=0' \
+    --uitest-timeout 12 --delay 200 --window 1400x860 2>/dev/null | grep -o 'CLOCK [A-Z]*' | head -1)
+fi
+echo "环境探针：动画时钟 ${CLOCK}（实测一根 150ms 动画能不能自己跑完）"
 
 VC=""
 if [[ "$ASLEEP" == "1" || "$ACTIVE" == "0" || "$CLOCK" != "CLOCK OK" ]]; then
@@ -128,10 +133,11 @@ if [[ "$ASLEEP" == "1" || "$ACTIVE" == "0" || "$CLOCK" != "CLOCK OK" ]]; then
   echo "      仍未覆盖：少数动画的 finished 在无帧时永不兑现（第 4 手 anims=3 就是它），"
   echo "      以及「合成器真的画出了这一帧」。这两条要醒着跑才算验过，别当成全绿。"
 else
-  echo "环境：显示器醒着（asleep=$ASLEEP active=$ACTIVE），走真动画时钟"
+  echo "环境：显示器醒着（asleep=${ASLEEP} active=${ACTIVE}），走真动画时钟"
 fi
 
 echo "界面行为："
+run '可靠性回归' "$BOOT_EMPTY" 'uitest=reliable&snap=1'
 run '焦点/快捷键' "$BOOT_SAVE" 'uitest=keys'
 run '设置与偏好' "$BOOT_EMPTY" 'uitest=prefs'
 # 局长那一档全是接线判据（点药丸、开局传参、文案），不判手感，压快不改变任何一条结论
@@ -172,4 +178,4 @@ if [[ -n "$MODES" && "$ran" == "0" ]]; then
   echo "UITEST FAIL：MODES=$MODES 一个标签都没匹配上（拼错关键词不该变成"0 档全绿"）"
   exit 1
 fi
-if [[ $fails -eq 0 ]]; then echo "UITEST OK：界面判据全绿$([[ -n "$MODES" ]] && echo "（MODES=$MODES，只跑了 $ran 档，不是全量门禁）")"; else echo "UITEST FAIL（$fails 档没过）"; exit 1; fi
+if [[ $fails -eq 0 ]]; then echo "UITEST OK：可评估的界面判据通过$([[ -n "$MODES" ]] && echo "（MODES=${MODES}，只跑了 $ran 档，不是全量门禁）")"; else echo "UITEST FAIL（$fails 档没过）"; exit 1; fi

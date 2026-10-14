@@ -7,7 +7,7 @@
 // 关键纪律：flag 关掉时 targetFor/reward 必须和改之前**逐位一致**，
 // 老种子、老录像、老存档的分数不能变。所以这里的 targetMult 就是 1.5^tier，
 // rewardBase 就是 1+0.5·tier，表只是把同一个式子写出来，不是换一套数。
-export type FailPenalty = 'none' | 'loseMoney' | 'losePatron' | 'loseRound';
+export type FailPenalty = 'none' | 'loseMoney' | 'losePatron' | 'loseRound' | 'loseRunAsIs';
 
 export interface BetDef {
   tier: number;

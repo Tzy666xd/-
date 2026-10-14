@@ -7,6 +7,15 @@
 # 拼错关键词不该变成"0 条盲区，OK"的假绿。
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+# 原生 App 与资源也复制，测试失败或被终止均不触碰正式包与源码。
+if [[ "${GUINEA_INJECTION_COPY:-0}" != "1" ]]; then
+  RUN_COPY=$(mktemp -d "${TMPDIR:-/tmp}/guinea-ui-injection.XXXXXX")
+  trap 'rm -rf "$RUN_COPY"' EXIT
+  cp -R core web tools dist "$RUN_COPY/" || exit 2
+  GUINEA_INJECTION_COPY=1 bash "$RUN_COPY/tools/falsify-ui.sh"
+  exit $?
+fi
 export STOP_FAIL=1   # 每条注入只问红没红，第一档红就收工（见 uitest.sh）
 
 SRC=web/main.ts
@@ -18,6 +27,12 @@ trap 'restore; rm -rf "$BAK"' EXIT
 
 # ||| 分隔：文件 原样 改成 说明
 INJ=(
+  "web/main.ts|||  saveNow();            // 内核已入账，动画中退出也应恢复到这一步|||  void 0;|||可靠性：普通出牌不立即存档"
+  "web/main.ts|||  const got = discard(g);\n  saveNow();|||  const got = discard(g);|||可靠性：弃牌不立即存档"
+  "web/main.ts|||    renderAll();\n    saveNow();\n    return;|||    renderAll();\n    return;|||可靠性：使用牌谱不立即存档"
+  "web/main.ts|||    if (seenSets !== null && names.some((n) => !seenSets.includes(n)))|||    if (names.some((n) => !seenSets.includes(n)))|||可靠性：已有套装首次进铺子报错"
+  "web/main.ts|||  trace.textContent = scoreText(lastChain, cardNameOf);|||  trace.textContent = '计分记录';|||可靠性：玩家账本缺少实际计分事件"
+  "web/main.ts|||  const actualSeed = mode === 'daily' ? dailySeed() : seed;|||  const actualSeed = seed;|||可靠性：菜单开每日局能指定任意种子"
   "web/main.ts|||refreshResume();\n// 第一次玩的话|||void 0;\n// 第一次玩的话|||启动时不查存档：续局按钮永远不出现"
   "web/main.ts|||  savePrefs();\n}|||  void 0;\n}|||设置改完不落盘：改完音量/画法重启就全丢"
   "web/main.ts|||  if (tag === 'INPUT' || tag === 'TEXTAREA') {|||  if (false) {|||快捷键在输入框里照样抢按键"
@@ -64,7 +79,7 @@ INJ=(
   "web/main.ts|||  sfx.play(on ? 'pick' : 'unpick');|||Ø|||选牌与放回没有声音"
   "web/main.ts|||    this.fired[cue] = (this.fired[cue] ?? 0) + 1;|||Ø|||音效日志失效，响过哪些声根本没记"
   "web/main.ts|||    // 记账与摘线绑在一起：只增计数不真摘，pending 就量不出漏（背景乐那边踩过）\n    this.made += 1 + (extra ? 1 : 0);|||    // 记账与摘线绑在一起：只增计数不真摘，pending 就量不出漏（背景乐那边踩过）\n    this.made += 1;|||噪声层的滤波器没记进回收账，漏了也量不出"
-  "web/main.ts|||    if (names.some((n) => !seenSets.includes(n))) sfx.play('set');|||    void 0;|||P1-1 新凑成一套没有声音反馈"
+  "web/main.ts|||    if (seenSets !== null && names.some((n) => !seenSets.includes(n))) sfx.play('set');|||    void 0;|||P1-1 新凑成一套没有声音反馈"
   "web/main.ts|||    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, L.gain), t0 + 0.01);|||    g.gain.exponentialRampToValueAtTime(0.0002, t0 + 0.01);|||包络写死成静音值：参数全合法，一个样本都不响"
   "web/main.ts|||    src.stop(t0 + L.dur + 0.03);|||    src.stop(t0 + 0.0004);|||声源刚起就被掐掉，只剩咔一声底"
   "web/main.ts|||    const oc = new OfflineAudioContext(1, Math.ceil(sr * span), sr);|||    const oc = new OfflineAudioContext(1, 64, sr);|||离线渲染只取一样长的窗，量不到真实峰值"
@@ -73,7 +88,7 @@ INJ=(
   "web/main.ts|||  gauges: '#gauges', shop: '#shopBody .slots', raise: '.raise',|||  gauges: '#gauges', shop: '#btnShop', raise: '.raise',|||铺子那条指回被面板盖住的顶栏按钮，气泡看不见"
   "web/main.ts|||  // 那这个开关看着就是坏的——它是唯一一处改了偏好却没人重投影的地方\n  refreshTutorial();|||  // 那这个开关看着就是坏的——它是唯一一处改了偏好却没人重投影的地方\n  void 0;|||关掉引导要等下一次别处渲染才见效（开关看着是坏的）"
   "web/styles.css|||  pointer-events: none;\n  background: linear-gradient(180deg, rgba(52, 34, 16, .96), rgba(26, 15, 7, .96));|||  pointer-events: auto;\n  background: linear-gradient(180deg, rgba(52, 34, 16, .96), rgba(26, 15, 7, .96));|||气泡拦住点击，教程反过来挡住玩家第一次操作"
-  "web/main.ts|||  claimGuide();|||  void 0;|||做到的课不记进进度：牌一打出去气泡就退回上一节"
+  "web/main.ts|||  if (claimGuide()) saveNow();|||  void 0;|||做到的课不记进进度：牌一打出去气泡就退回上一节"
   "web/main.ts|||  body.append(foot);\n  refreshTutorial();|||  body.append(foot);|||铺子里点完请客人/抬注不重投影：那两节课做完了还挂在屏上"
   "web/main.ts|||  if (!inGuide(g.state.guide) || busy) return null;|||  if (busy) return null;|||普通局也被当成教学局：每局开局都弹第一课"
   "web/main.ts|||  if (!prefs.tutorial || busy || inGuide(g.state.guide)) return null;|||  if (!prefs.tutorial || busy) return null;|||上完课之后路过提醒又冒出来，和引导抢同一个气泡"
@@ -164,6 +179,30 @@ elif ! bash tools/uitest.sh >/tmp/falsify-ui-baseline.log 2>&1; then
   exit 1
 fi
 echo "  基线全绿，继续注入"
+# 一批注入共用刚量过的时钟；动态档失败仍会按原来的策略复跑。
+if [[ -z "${SKIP_BASELINE:-}" ]]; then
+  UITEST_CLOCK_STATE=$(grep -m1 -o 'CLOCK \(OK\|STUCK\)' /tmp/falsify-ui-baseline.log || true)
+  export UITEST_CLOCK_STATE
+fi
+
+# 先跑最直接的具名判据。没抓到时必定回退全套，避免分类错误变成漏测。
+focus_modes() {
+  case "$1" in
+    *可靠性*) echo '可靠性';;
+    *快捷键*|*输入框*) echo '焦点/快捷键';;
+    *抽牌*|*扇面*|*扣过来*|*翻面*|*抽来*) echo '抽牌礼';;
+    *事件*|*三选一*|*牌局自决*|*卡面上那只*|*卡点不动*|*点卡之后*) echo '随机事件';;
+    *教学*|*上课*|*课表*|*气泡*|*引导*|*节课*|*做到的课*|*课程*|*序号*|*知道了*|*现在做这个*|*进度*|*动手的课*|*讲过的*|*铺子那条*) echo '引导关,新手引导,开机现场';;
+    *轮数*|*局长*|*无尽局*|*换档*|*牌组那一排*) echo '局长';;
+    *跳过*|*空格*|*点牌桌*) echo '跳过演出';;
+    *P0-*|*P1-*|*签名宾*|*候选*|*拆解*|*选牌*|*音效日志*) echo '新功能验收,演出路径';;
+    *滤波器*|*低通*|*回收账*|*cardEls*) echo '性能与泄漏';;
+    *包络*|*声源*|*离线渲染*) echo '音效渲染';;
+    *出牌*|*弃牌*|*幕布*|*真点牌*) echo '鼠标可点,幕布按钮';;
+    *偏好*|*静音*|*设置*|*音乐*|*播放器*|*局势*|*曲子*|*曲名*|*牌组*|*节奏*|*调度器*|*紧张*) echo '设置与偏好,重启回读';;
+    *) echo '';;
+  esac
+}
 for entry in "${INJ[@]}"; do
   why=${entry##*'|||'}
   if [[ -n "${ONLY:-}" ]]; then
@@ -201,9 +240,20 @@ PY
     blind=$((blind + 1)); continue
   fi
   node tools/build-web.mjs --quiet >/dev/null 2>&1
-  out=$(bash tools/uitest.sh 2>&1)
-  if [[ $? -eq 0 ]]; then
+  focused="${MODES:-$(focus_modes "$why")}"
+  out=$(MODES="$focused" bash tools/uitest.sh 2>&1)
+  code=$?
+  if [[ $code -eq 0 && -n "$focused" && -z "${MODES:-}" ]]; then
+    out=$(MODES= bash tools/uitest.sh 2>&1)
+    code=$?
+  fi
+  if [[ $code -eq 0 ]]; then
     echo "  BLIND $why —— 界面门禁全绿"
+    blind=$((blind + 1))
+  elif ! printf '%s' "$out" | grep -q 'UITEST FAIL'; then
+    # 构建失败、脚本自身错误或启动失败，都不是界面判据抓到了注入。
+    echo "  NOISE $why —— 没有界面失败裁决，拒绝记成 caught"
+    printf '%s\n' "$out" | tail -5 | sed 's/^/        /'
     blind=$((blind + 1))
   else
     echo "  caught  $why → $(printf '%s' "$out" | grep -m1 -A1 'FAIL ' | tr '\n' ' ' | cut -c1-120)"
@@ -212,7 +262,7 @@ PY
 done
 
 echo "----"
-echo "注入 $total 条，盲区/坏条目 $blind 条"
+echo "注入 $((total - skipped)) 条，盲区/坏条目 $blind 条"
 if [[ -n "${ONLY:-}" ]]; then
   echo "（ONLY 过滤：跳过 $skipped 条，只跑了 $((total - skipped)) 条——这不是全量门禁）"
   if [[ $((total - skipped)) -eq 0 ]]; then

@@ -1,34 +1,50 @@
 #!/bin/bash
 # 打成一个能双击的 .app，并同步到桌面。
-# 每一步都要能在命令行里复现：build-web → swift build → 组装 bundle → 图标 → ad-hoc 签名 → 拷桌面。
+# 每一步都能复现：前端类型擦除 → Swift 编译 → bundle → 代码图标 → 分渠道签名 → 拷桌面。
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="几尼"
 BUNDLE_ID="local.guinea.app"
 EXE="Guinea"
-VERSION="1.0"
+VERSION="${VERSION:-1.0.1}"
+BUILD_NUMBER="${BUILD_NUMBER:-2}"
+CHANNEL="${CHANNEL:-local}"
+if [[ "${RELEASE:-0}" == "1" && "$CHANNEL" == "local" ]]; then CHANNEL="developer-id"; fi
+case "$CHANNEL" in local|developer-id|app-store) ;; *) echo "未知 CHANNEL=$CHANNEL"; exit 2;; esac
+if [[ "$CHANNEL" != "local" && -z "${SIGN_IDENTITY:-}" ]]; then
+  echo "CHANNEL=${CHANNEL} 需要 SIGN_IDENTITY；本机试玩请使用 CHANNEL=local"; exit 2
+fi
 BIN_NAME="House"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 WEB_SRC="web"
 
 export NODE_NO_WARNINGS=1
+export CLANG_MODULE_CACHE_PATH="$PWD/shell/.build/ModuleCache"
+export SWIFTPM_MODULECACHE_OVERRIDE="$CLANG_MODULE_CACHE_PATH"
 
 echo "① 前端打包（类型擦除，零依赖）"
 node tools/build-web.mjs
 
 echo "② Swift 外壳"
-# 通用二进制：Intel 与 Apple Silicon 都装得上。macOS 27 SDK 会警告 x86_64 已弃用，
-# 但产物仍被接受；万一编不动就退回 arm64-only（也合规，只是不覆盖 Intel 机型）。
-ARCHS=(--arch arm64 --arch x86_64)
-if ! (cd shell && swift build -c release "${ARCHS[@]}" >/dev/null 2>&1); then
-  echo "   通用构建失败，退回 arm64-only"
-  ARCHS=(--arch arm64)
-fi
-(cd shell && swift build -c release "${ARCHS[@]}")
-BIN="$(cd shell && swift build -c release "${ARCHS[@]}" --show-bin-path)/$BIN_NAME"
-ICON_BIN="$(cd shell && swift build -c release "${ARCHS[@]}" --show-bin-path)/IconRender"
+# 两个目标都是无依赖单文件，直接用 Swift 编译器构建，避免 SwiftPM 的用户缓存与嵌套沙箱。
+NATIVE_OUT="$PWD/shell/.build/standalone"
+mkdir -p "$NATIVE_OUT"
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+for target in House IconRender; do
+  xcrun swiftc -swift-version 5 -O -sdk "$SDK" -target arm64-apple-macosx13.0 \
+    -module-cache-path "$CLANG_MODULE_CACHE_PATH" "shell/Sources/$target/main.swift" -o "$NATIVE_OUT/$target-arm64"
+  if xcrun swiftc -swift-version 5 -O -sdk "$SDK" -target x86_64-apple-macosx13.0 \
+      -module-cache-path "$CLANG_MODULE_CACHE_PATH" "shell/Sources/$target/main.swift" -o "$NATIVE_OUT/$target-x86_64"; then
+    lipo -create "$NATIVE_OUT/$target-arm64" "$NATIVE_OUT/$target-x86_64" -output "$NATIVE_OUT/$target"
+  else
+    echo "   $target 的 Intel 构建失败，仅交付 arm64"
+    cp "$NATIVE_OUT/$target-arm64" "$NATIVE_OUT/$target"
+  fi
+done
+BIN="$NATIVE_OUT/$BIN_NAME"
+ICON_BIN="$NATIVE_OUT/IconRender"
 
 echo "③ 组装 bundle"
 rm -rf "$APP"
@@ -51,7 +67,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>$EXE</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+  <key>GuineaDistributionChannel</key><string>$CHANNEL</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -90,12 +107,19 @@ echo "④ 图标（代码画的，不用外部图稿）"
 "$ICON_BIN" "$DIST/icon-source.png" 1024
 ICONSET="$DIST/AppIcon.iconset"
 rm -rf "$ICONSET"; mkdir -p "$ICONSET"
-for s in 16 32 64 128 256 512; do
+for s in 16 32 128 256 512; do
   sips -z $s $s "$DIST/icon-source.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
   d=$((s * 2))
   sips -z $d $d "$DIST/icon-source.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+if ! iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"; then
+  if [[ -n "${ICON_FALLBACK:-}" && -f "$ICON_FALLBACK" ]]; then
+    echo "   图标转换未完成，复用已验证的同款图标：$ICON_FALLBACK"
+    cp "$ICON_FALLBACK" "$APP/Contents/Resources/AppIcon.icns"
+  else
+    echo "图标转换失败；可用 ICON_FALLBACK 指定已验证的同款代码图标"; exit 1
+  fi
+fi
 rm -rf "$ICONSET"
 
 echo "⑤ 隐私清单与上架图"
@@ -106,9 +130,11 @@ cp shell/Resources/PrivacyInfo.xcprivacy "$APP/Contents/Resources/"
 echo "⑥ 签名"
 # 必须在所有资源都进包之后再签：先签后拷会让 _CodeSignature 不含新资源，
 # codesign --verify 报 "code has no resources but signature indicates they must be present"
-if [[ "${RELEASE:-0}" == "1" && -n "${SIGN_IDENTITY:-}" ]]; then
+if [[ "$CHANNEL" == "app-store" ]]; then
   codesign --force --options runtime --timestamp \
     --entitlements shell/House.entitlements --sign "$SIGN_IDENTITY" "$APP"
+elif [[ "$CHANNEL" == "developer-id" ]]; then
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 else
   codesign --force --sign - "$APP"
 fi
@@ -118,27 +144,28 @@ codesign --verify --strict --verbose=2 "$APP" 2>&1 | tail -1
 codesign -dvv "$APP" 2>&1 | grep -q "Sealed Resources=none" && { echo "Sealed Resources 为空，资源没进签名"; exit 1; } || true
 
 echo "⑦ 同步到桌面"
-rm -rf "$HOME/Desktop/$APP_NAME.app"
-cp -R "$APP" "$HOME/Desktop/"
+if [[ "${COPY_TO_DESKTOP:-1}" == "1" ]]; then
+  mkdir -p "$HOME/Desktop/$APP_NAME.app"
+  rsync -a --delete "$APP/" "$HOME/Desktop/$APP_NAME.app/"
+  codesign --verify --strict "$HOME/Desktop/$APP_NAME.app"
+fi
 
 echo "打好了：$APP"
-echo "桌面版：$HOME/Desktop/$APP_NAME.app"
+if [[ "${COPY_TO_DESKTOP:-1}" == "1" ]]; then echo "桌面版：$HOME/Desktop/$APP_NAME.app"; fi
 echo "抓图：'$APP/Contents/MacOS/$EXE' --shot /tmp/s.png --delay 1200 --window 1500x900 --query 'autostart=1'"
 
 # ── 发布模式（上架用）───────────────────────────────────────────
 # 默认构建是 ad-hoc 且不沙盒：保证双击就能玩。
-# RELEASE=1 时套上 App Sandbox entitlements 并用真实证书签名，产出可提交的 zip。
+# CHANNEL=developer-id 不加沙盒；CHANNEL=app-store 才使用沙盒 entitlement。
 # 沙盒 + ad-hoc 在部分 macOS 上会导致容器建不出来、启动即退，所以本地模式刻意不开沙盒。
-if [[ "${RELEASE:-0}" == "1" ]]; then
+if [[ "$CHANNEL" != "local" ]]; then
   IDENTITY="${SIGN_IDENTITY:-}"
   if [[ -z $IDENTITY ]]; then
     echo "RELEASE=1 需要 SIGN_IDENTITY（例如 \"Developer ID Application: 名字 (TEAMID)\"）"
     echo "本机可用身份："; security find-identity -v -p codesigning 2>/dev/null | sed 's/^/  /'
     exit 2
   fi
-  echo "⑧ 发布签名（沙盒 + 完整资源）"
-  codesign --force --options runtime --timestamp \
-    --entitlements shell/House.entitlements --sign "$IDENTITY" "$APP"
+  echo "⑧ 发布验证（${CHANNEL}）"
   codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
   spctl --assess --type execute --verbose "$APP" 2>&1 | tail -1 || true
 
@@ -147,8 +174,9 @@ if [[ "${RELEASE:-0}" == "1" ]]; then
   rm -f "$ZIP"
   ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
   echo "  $ZIP"
-  echo "  公证（需要 notarytool profile 或 App Store Connect API key）："
-  echo "    xcrun notarytool store-credentials guinea --apple-id <你> --team-id <TEAMID> --password <app专用密码>"
-  echo "    xcrun notarytool submit '$ZIP' --keychain-profile guinea --wait"
-  echo "    xcrun stapler staple '$APP'"
+  if [[ "$CHANNEL" == "developer-id" ]]; then
+    echo "  公证（需要已配置的 notarytool profile）："
+    echo "    xcrun notarytool submit '$ZIP' --keychain-profile guinea --wait"
+    echo "    xcrun stapler staple '$APP'"
+  fi
 fi

@@ -80,7 +80,7 @@ export interface ModeDef { id: Mode; name: string; blurb: string }
 export const MODES: ModeDef[] = [
   { id: 'run', name: '经营', blurb: '打满你选的轮数就散场（默认八夜，可 3～15 夜）' },
   { id: 'endless', name: '无尽', blurb: '没有最后一夜，彩头一路翻倍，看你能撑到第几夜' },
-  { id: 'daily', name: '每日一局', blurb: '全机同一天同一副牌序，锁标准牌组，只此一局' },
+  { id: 'daily', name: '每日一局', blurb: '当天固定种子、标准难度和牌组、八夜固定规则；可反复复盘' },
   { id: 'practice', name: '修行', blurb: '不会散场：牌权用完就补满，拿来试构筑' },
 ];
 export const modeById = (id: string): ModeDef => MODES.find((m) => m.id === id) ?? MODES[0];
@@ -333,6 +333,19 @@ export function targetOf(s: GameState): number {
   return targetFor(s.night, s.stage, s.raisedHere, limits(s).targetScale, s.flags.bets);
 }
 
+/** 铺子预告按下一场的夜数与到期规则算，绝不消耗随机流或改变当前局。 */
+export function nextTarget(s: GameState, raised: number): number {
+  const stage = s.stage < 2 ? (s.stage + 1) as Stage : 0;
+  const night = s.stage < 2 ? s.night : s.night + 1;
+  const next: GameState = {
+    ...s, stage, night, bossId: null, raisedHere: raised,
+    eventMods: s.flags.events
+      ? s.eventMods.filter((m) => m.scope === 'run' || (m.scope === 'night' && m.night === night))
+      : [],
+  };
+  return targetOf(next);
+}
+
 export const stakeLabel = (s: GameState): string => {
   const kind = STAGE_KIND[s.stage];
   const b = bossOf(s);
@@ -462,6 +475,7 @@ export function play(g: Game): ScoreResult | null {
   if (s.status !== 'playing' || !s.chosen.length || s.handsLeft <= 0) return null;
   const rand = g.rand;
   const played = chosenCards(s);
+  if (!played.length || played.length > 5) return null;
   const result = evaluate(played);
 
   // 上一手那几张已经打完：它们进弃牌堆（牌堆抽空时 refill 会把它洗回来接着发），
@@ -577,12 +591,20 @@ function betReprieve(g: Game): boolean {
   if (verdict.resetScore !== true || verdict.kind === 'loseRunAsIs' || verdict.kind === 'none') return false;
   s.betReprieves += 1;
   s.money = Math.max(0, s.money + verdict.moneyDelta);
+  let penaltyNote = verdict.note;
   for (let i = 0; i < -verdict.seatsDelta; i++) {
     // 请走最右边那位：不动玩家的构筑顺序，也不会把 copy:'left' 的依赖整个抽走
     if (s.seats.length > 0) {
       const out = s.seats[s.seats.length - 1];
-      s.seats.pop();
-      g.note(`${patronById(out.pid).name} 被请了出去`);
+      const index = s.seats.length - 1;
+      if (strandingOnSeatLoss(s, index)) {
+        const loss = Math.floor(s.money * 0.2);
+        s.money -= loss;
+        penaltyNote = `${patronById(out.pid).name}撑着随身格，改赔 £${loss}，物品保留，本场重做`;
+      } else {
+        removeSeat(s, index);
+        g.note(`${patronById(out.pid).name} 被请了出去`);
+      }
     }
   }
   s.score = 0;
@@ -596,7 +618,7 @@ function betReprieve(g: Game): boolean {
   s.claimed = s.claimed.filter((id) => THRESHOLDS.find((d) => d.id === id)?.carryOver === true);
   recycle(g);
   drawTo(s, after.handSize, g.rand);
-  g.note(verdict.note);
+  g.note(penaltyNote);
   return true;
 }
 
@@ -1041,8 +1063,7 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
       // 信凭空挤出去。全都带不走就谁也不走，把这句话摆在账里，而不是硬塞一个错误
       const safe = s.seats.map((x, i) => i).filter((i) => !strandingOnSeatLoss(s, i));
       if (!safe.length) { out.push('可带走的人人都撑着随身格，一位也没走'); return; }
-      const seat = s.seats.splice(g.rand.pick(safe), 1)[0];
-      syncSignature(s);
+      const seat = removeSeat(s, g.rand.pick(safe));
       if (op.refund) s.money = Math.max(0, s.money + op.refund);
       out.push(`${patronById(seat.pid).name}离席${op.refund ? `，补 £${op.refund}` : ''}`);
       return;
@@ -1358,6 +1379,13 @@ function syncSignature(s: GameState): void {
   if (s.signature && !s.seats.some((x) => x.pid === s.signature)) s.signature = '';
 }
 
+/** 三条离席路径共用同一项变更，签名宾标记与在座名单同步。容量先由调用方核对。 */
+function removeSeat(s: GameState, index: number): Seat {
+  const seat = s.seats.splice(index, 1)[0];
+  syncSignature(s);
+  return seat;
+}
+
 /**
  * 请走某位客人之后，随身格还装得下现有的信吗？
  * 套装的 +1 随身是**这两位都在场**才有的（`sets.ts` 的信匣/同乡那几套），所以卖掉或
@@ -1379,8 +1407,7 @@ export function sellSeat(g: Game, index: number): boolean {
   }
   const p = patronById(seat.pid);
   s.money += Math.max(1, Math.floor((p.cost + EDITION_PREMIUM[seat.edition]) / 2));
-  s.seats.splice(index, 1);
-  syncSignature(s);           // 卖掉的正是签名宾时，当场就不该再宣称他在座
+  removeSeat(s, index);
   g.note(`${p.name} 离席`);
   trimHand(g);
 
@@ -1502,7 +1529,7 @@ export class Game {
     // 第三个参数收 bool 是为了让 75 处既有调用点不动（其中两处传 endless）
     const o: RunOpts = typeof opts === 'boolean' ? { endless: opts } : opts;
     const mode: Mode = modeById(o.mode ?? (o.endless ? 'endless' : 'run')).id;
-    const diff: Diff = diffById(o.diff ?? 'standard').id;
+    const diff: Diff = mode === 'daily' ? 'standard' : diffById(o.diff ?? 'standard').id;
     const df = diffById(diff);
     this.rand = new Rand(seed);
     uid = 1;
@@ -1521,8 +1548,8 @@ export class Game {
       seats: [], consumables: [], books: {}, handUse: {}, vouchers: [], bossId: null,
       handsLeft: 4, discardsLeft: 3, handIndex: 0, discardsUsed: 0, score: 0,
       shop: [], rerolls: 0, ledger: [], discovered: [], settlement: [],
-      endless: mode === 'endless' || !!o.endless, diff, mode, log: [],
-      flags: { ...FLAGS_OFF, ...(o.flags ?? {}) },
+      endless: mode !== 'daily' && (mode === 'endless' || !!o.endless), diff, mode, log: [],
+      flags: mode === 'daily' ? { ...FLAGS_OFF } : { ...FLAGS_OFF, ...(o.flags ?? {}) },
       claimed: [], betReprieves: 0, buffer: START_BUFFER, signature: '', tutorial: [], guide: [],
       eventAt: 0, nightActions: 0, pendingEvent: [], events: [], eventMods: [],
     };

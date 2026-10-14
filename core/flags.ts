@@ -47,7 +47,7 @@ export const FLAG_LABEL: Record<keyof FeatureFlags, string> = {
   adjacency: '邻接共鸣',
   sets: '套装',
   growth: '客人长进',
-  layers: '卡牌 layered',
+  layers: '卡牌花样',
   discardOps: '弃牌堆可翻',
   draft: '开局选签名宾',
   events: '随机事件',

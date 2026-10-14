@@ -1,7 +1,7 @@
 // 渲染层：只做投影，不做算术。所有数字一律取自结算事件的 after 快照，
 // 所以"演出来的账"不可能和"内核记的账"不一致——这是把动效做复杂而不做错的唯一前提。
 import {
-  Game, play, discard, settle, limits, targetOf, targetFor, stakeLabel, stakeBlurb, levelOf, preview,
+  Game, play, discard, settle, limits, targetOf, targetFor, nextTarget, stakeLabel, stakeBlurb, levelOf, preview,
   chosenCards, toggleChosen, buy, reroll, rerollPrice, setRaise, sellSeat, useConsumable,
   continueEndless, seatedCount, mkSeat, STAGE_LABEL, STAGE_KIND,
   eventChoices, chooseEvent, autoResolveEvent, fanOffer,
@@ -28,6 +28,8 @@ import { patronById, letterById, VOUCHERS, BOOKS, DECKS, PATRONS, deckById, deck
 import { HOOK_LABEL, KIND_LABEL, RARITY_LABEL, EDITION_NAME, EDITION_BLURB, EDITION_PREMIUM } from './core/effects.ts';
 import type { PatronDef, Edition, Seat } from './core/effects.ts';
 import { serialize as dumpSave, deserialize as loadSave, summarize as sumSave, SAVE_KEY } from './core/save.ts';
+import { createSaveStore } from './persistence.ts';
+import { scoreText } from './score-view.ts';
 import { THRESHOLDS, thresholdValue, nextGap } from './core/thresholds.ts';
 import { drawOffer, offerLine, nextRerolls, OFFER_SIZE } from './core/draft.ts';
 import { LENGTHS, DEFAULT_NIGHTS, clampNights, lengthOf } from './core/lengths.ts';
@@ -46,11 +48,11 @@ import type { FeatureFlags } from './core/flags.ts';
 const FEATURE_BLURB: Record<keyof FeatureFlags, string> = {
   thresholds: '回合目标：水位条上多几条线，决定这手是冲线拿奖励还是留强牌',
   bets: '加注：把抬注的档位与失手的罚则交给数据表，不再只有一档"输整场"',
-  adjacency: '邻接共鸣：可以拖动座位调结算顺序，让同类的客人挨在一起',
+  adjacency: '邻接共鸣：在铺子里用左右箭头换座，每次 £2，让同类客人相邻',
   sets: '套装：凑齐同一 tag 的几位客人换一条规矩（多一个座位/多一次重掷）',
   growth: '客人长进：同一位客人用多了会升一档，但有上限',
-  layers: '卡牌 layered：把牌的强化与蜡封从两个写死的枚举变成两张数据表',
-  discardOps: '弃牌堆：可以翻开看，花一次机会把一张捞回牌堆',
+  layers: '卡牌花样：一张牌可同时带一种强化和一道蜡封',
+  discardOps: '弃牌堆：可以翻开看，花 £5 把一张捞回牌堆底',
   draft: '开局从五位客人里请一位入座：靠脑子的、稳吃的、吃运气的，路线完全不同',
   events: '随机事件：每夜递进来一件事，三件里应一件（也可以让牌局自决），选下去的那条会改往后的账',
 };
@@ -610,6 +612,10 @@ function syncCard(c: Card, node: HTMLElement): void {
   const chosen = g.state.chosen.includes(c.id);
   const target = armed !== null && armed.got.includes(c.id);
   node.dataset.id = String(c.id);
+  node.setAttribute('role', 'button');
+  node.tabIndex = g.state.hand.some((x) => x.id === c.id) ? 0 : -1;
+  node.setAttribute('aria-label', `${RANK_LABEL(c.rank)}${SUIT_GLYPH[c.suit]}${c.enh !== 'none' ? `，${materialById(c.enh).name}` : ''}${c.seal !== 'none' ? `，${SEAL_NAME[c.seal]}` : ''}`);
+  node.setAttribute('aria-pressed', String(chosen || target));
   node.className = 'card'
     + (c.suit === 'h' || c.suit === 'd' ? ' red' : '')
     + (c.enh !== 'none' ? ` e-${c.enh}` : '')
@@ -680,6 +686,9 @@ function cardNode(c: Card): HTMLElement {
     cardEls.set(c.id, node);
     const ref = node;
     node.addEventListener('click', () => onCardClick(c.id, ref));
+    node.addEventListener('keydown', (ev) => {
+      if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); onCardClick(c.id, ref); }
+    });
   }
   syncCard(c, node);
   return node;
@@ -782,6 +791,7 @@ function patronNode(p: PatronDef): HTMLElement {
       const seat = g.state.seats[i];
       const back = Math.max(1, Math.floor((p.cost + (EDITION_PREMIUM[seat.edition] ?? 0)) / 2));
       if (sellSeat(g, i)) {
+        saveNow();
         sfx.play('leave');
         node.classList.add('leaving');
         flyMoney(back, node);
@@ -1195,7 +1205,7 @@ function claimGuide(): boolean {
 
 /** 把该说的话投到气泡上：一门课优先，其次才是路过提醒 */
 function refreshTutorial(): void {
-  claimGuide();
+  if (claimGuide()) saveNow();
   const f = guideFactsNow();
   const l = currentLesson(f);
   if (l) {
@@ -1268,6 +1278,7 @@ function onConsumable(i: number): void {
   if (c.t === 'book') {
     if (useConsumable(g, i, [])) { sfx.play('grow'); toast(g.state.log[0] ?? ''); }
     renderAll();
+    saveNow();
     return;
   }
   if (armed && armed.index === i) { armed = null; toast('收回了引荐信'); renderAll(); return; }
@@ -1287,6 +1298,7 @@ async function doPlay(): Promise<void> {
   // 先重排会让打出的两张和新发的两张同时出现在手里，飞行也就失去了起点。
   renderGauges();
   if (!res) { setBusy(false); return; }
+  saveNow();            // 内核已入账，动画中退出也应恢复到这一步
   // 拆解文本要在**两条路**上都拿得到：演出走完是一条，跳过/抓帧是另一条。
   // 只写在 runTimeline 里的话，snap 模式与跳过之后 chain() 会空着——
   // 而"一行可解释"这条硬约束恰恰要求跳过路径也给得出同一份账。
@@ -1297,8 +1309,12 @@ async function doPlay(): Promise<void> {
 
 async function doDiscard(): Promise<void> {
   if (busy || g.state.status !== 'playing' || !g.state.chosen.length) return;
+  if (g.state.discardsLeft <= 0 || g.state.pendingEvent.length) return;
+  setBusy(true);
+  const activeGame = g;
   const gone = chosenCards(g.state);
   const got = discard(g);
+  saveNow();
   sfx.play('discard');
   if (!SNAP) {
     // 弃牌要"先拈起来再甩出去"：直接向下平移 + 线性淡出，读起来像牌被吸尘器吸走
@@ -1315,12 +1331,15 @@ async function doDiscard(): Promise<void> {
         { transform: `translate(${(side * 30).toFixed(1)}px, 104px) rotate(${(side * 15).toFixed(1)}deg) scale(.88)`,
           opacity: 0, offset: 1 },
       ], { duration: Math.round(440 / speedMul), delay: Math.round(i * 54 / speedMul), fill: 'both' });
-      return a.finished.then(() => a.cancel(), () => {});
+      liveAnims.add(a);
+      return a.finished.then(() => {}, () => {}).finally(() => { liveAnims.delete(a); a.cancel(); });
     });
     await Promise.all(jobs);
   }
+  if (g !== activeGame) return;
   for (const c of gone) { cardEls.get(c.id)?.remove(); cardEls.delete(c.id); }
   toast(got === 0 ? `弃 ${gone.length} 张` : `弃 ${gone.length} 张 · £${got > 0 ? '+' : ''}${got}`);
+  setBusy(false);
   renderAll();
 }
 
@@ -1649,25 +1668,16 @@ function flare(mag: number): void {
 // ── 存档 ─────────────────────────────────────────────────────
 // localStorage 在隐私模式或被禁用时会抛，所以整条路都要包起来：
 // 存不了不能影响玩，只是没有"继续上一局"。
-const STORE = {
-  get(): string | null {
-    try { return localStorage.getItem(SAVE_KEY); } catch { return null; }
-  },
-  set(text: string): boolean {
-    try { localStorage.setItem(SAVE_KEY, text); return true; } catch { return false; }
-  },
-  del(): void { try { localStorage.removeItem(SAVE_KEY); } catch { /* 无所谓 */ } },
-};
-
-let saveTimer = 0;
+const STORE = createSaveStore(() => localStorage);
 function saveNow(): void {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (g.state.status === 'won' || g.state.status === 'lost') { STORE.del(); refreshResume(); return; }
-    STORE.set(dumpSave(g));
-    refreshResume();
-  }, 120) as unknown as number;
+  const ended = g.state.status === 'won' || g.state.status === 'lost';
+  const saved = ended ? STORE.del() : STORE.set(dumpSave(g));
+  const note = need('#saveStatus');
+  note.textContent = saved ? '' : '进度暂未保存，请保留窗口并重试';
+  note.classList.toggle('failed', !saved);
+  refreshResume();
 }
+window.addEventListener('pagehide', () => { if (atTable()) saveNow(); });
 
 function refreshResume(): void {
   const btn = need<HTMLButtonElement>('#btnResume');
@@ -1743,7 +1753,7 @@ function loadPrefs(): Prefs {
       deck: typeof o.deck === 'string' && DECKS.some((d) => d.id === o.deck) ? o.deck : 'standard',
       mode: MODES.some((m) => m.id === o.mode) ? o.mode as Mode : 'run',
       diff: DIFFS.some((d) => d.id === o.diff) ? o.diff as Diff : 'standard',
-      track: num(o.track, 0, 8, 0),
+      track: typeof o.track === 'number' && Number.isInteger(o.track) ? num(o.track, 0, TUNES.length, 0) : 0,
       // 偏好里的 flags 也是外部输入：走同一个清洗，缺省落在"全关"上
       flags: sanitizeFlags(o.flags, { ...FLAGS_OFF }),
       // 签名宾只认表里真有的 id；认不出就当没选过，不凭空塞一位客人进新局
@@ -1889,7 +1899,7 @@ function renderCodex(): void {
     const cl = el('span', 'cl2');
     cl.textContent = seen
       ? (HANDS[k].book + ' 升一级：+' + HANDS[k].dMult + ' 倍注 / +' + HANDS[k].dChips + ' 流水')
-      : '用「誊抄」造出重复的牌，凑出来一次就永久记录';
+      : '用「誊抄」造出重复的牌，凑出来一次就记在本局图鉴';
     d.append(cn, cv, cx, ct, cl);
     return d;
   };
@@ -2000,7 +2010,7 @@ function renderShop(): void {
   if (g.state.flags.sets) {
     const act = activeSets(g.state.seats.map((x) => patronById(x.pid)));
     const names = act.map((x) => x.name);
-    if (names.some((n) => !seenSets.includes(n))) sfx.play('set');
+    if (seenSets !== null && names.some((n) => !seenSets.includes(n))) sfx.play('set');
     seenSets = names;
     const box = el('div', 'sets-box');
     const h = el('h4');
@@ -2081,7 +2091,7 @@ function renderShop(): void {
     const small = el('small');
     const bet = betFor(lv);
     small.textContent = lv === 0 ? '稳妥过关'
-      : `彩头 ${num(targetFor(nxt.night, nxt.stage, lv, lim.targetScale, g.state.flags.bets))}`
+      : `彩头 ${num(nextTarget(g.state, lv))}`
         + (g.state.flags.bets ? `\n失手：${bet.visibleHint ? penaltyName(bet.failPenalty) : '后果不明'}` : '');
     small.style.whiteSpace = 'pre-line';
     s.title = betLine(bet);
@@ -2178,7 +2188,7 @@ function renderSettings(): void {
   retake.textContent = '再上一次';
   retake.title = '开一局锁死种子的教学局，跟着气泡走一遍';
   retake.addEventListener('click', () => { closePanels(); startGuide(); });
-  body.append(setRow('第一课', `十节小课从头走一遍牌桌。这一局${inGuide(g.state.guide) ? `还剩 ${lessonsLeft(g.state.guide)} 节没上完` : '不是教学局，按右边那颗就开一局课'}。
+  body.append(setRow('第一课', `${LESSONS.length} 节小课从头走一遍牌桌。这一局${inGuide(g.state.guide) ? `还剩 ${lessonsLeft(g.state.guide)} 节没上完` : '不是教学局，按右边那颗就开一局课'}。
     教学局用的种子、牌组、难度都锁死，玩法与普通局同一条代码——上课与不上课，同一颗种子发出同一副牌`, retake));
   body.append(setRow('背景曲', `${TUNES.length} 首都是现场合成的，不挂任何音频素材。鼠标停在曲名上看它适合什么时候放`,
     seg([['无', 0] as [string, number | boolean, string?]].concat(
@@ -2230,6 +2240,13 @@ function renderSettings(): void {
 function renderLedger(): void {
   const body = need('#ledgerBody');
   body.textContent = '';
+  const detail = el('details', 'hand-detail');
+  const summary = el('summary');
+  summary.textContent = '上一手怎么计分';
+  const trace = el('pre', 'score-trace');
+  trace.textContent = scoreText(lastChain, cardNameOf);
+  detail.append(summary, trace);
+  body.append(detail);
   const t = el('table', 'ledger-t');
   t.innerHTML = '<thead><tr><th>场次</th><th>彩头</th><th>流水</th><th>入账</th><th>银钱</th><th>声望</th></tr></thead>';
   const tb = document.createElement('tbody');
@@ -2385,7 +2402,7 @@ const asPick = (x: { id: string; name: string; blurb: string }): PickItem =>
 let lastPick: 'mode' | 'diff' | 'deck' | 'length' = 'mode';
 
 function pickNote(): void {
-  const m = modeById(prefs.mode), d = diffById(prefs.diff), k = deckById(prefs.deck);
+  const m = modeById(prefs.mode), d = diffById(dailyLocked() ? 'standard' : prefs.diff), k = deckById(dailyLocked() ? 'standard' : prefs.deck);
   const l = lengthOf(nightsForRun());
   const n = need('#pickNote');
   n.textContent = '';
@@ -2417,13 +2434,15 @@ function renderPickers(): void {
   for (const [sel, list, key] of rows) {
     const box = need<HTMLElement>(sel);
     box.textContent = '';
-    box.classList.toggle('locked', key === 'deck' && lock);
+    box.classList.toggle('locked', (key === 'deck' || key === 'diff') && lock);
     for (const item of list) {
-      const b = el('button', 'pick' + (prefs[key] === item.id ? ' on' : ''));
+      const selected = lock && key === 'diff' ? 'standard' : lock && key === 'deck' ? 'standard' : prefs[key];
+      const b = el('button', 'pick' + (selected === item.id ? ' on' : ''));
       b.textContent = item.name;
       b.title = item.blurb;
       b.addEventListener('click', () => {
         if (key === 'deck' && dailyLocked()) return;   // 每日一局锁牌组，否则"同一天同一局"不成立
+        if (key === 'diff' && dailyLocked()) return;
         prefs[key] = item.id as never;
         if (key === 'deck') pickedDeck = item.id;
         lastPick = key;
@@ -2471,7 +2490,7 @@ function draftSeed(): number {
 
 /** 当前能进局的签名宾。flag 关了就整块藏掉，不读候选也不看已选的人 */
 function draftEligible(): boolean {
-  return prefs.flags.draft;
+  return prefs.flags.draft && !dailyLocked();
 }
 
 function renderDraft(): void {
@@ -2676,7 +2695,9 @@ function start(seed: number, deckId = pickedDeck, over?: { diff?: Diff; mode?: M
   // 偏好里的开关在**开局这一刻**被抄进 state.flags，之后这一局就用那份快照。
   // 中途去设置里翻开关不会搅了正在打的账——存档里带着 flags 就是为了这个。
   // over 只有引导关那一处在用：它要锁死难度、模式，并且强行关掉随机事件（见 guideFlags）。
-  g = new Game(seed, dailyLocked() ? 'standard' : deckId, {
+  const mode = over?.mode ?? prefs.mode;
+  const actualSeed = mode === 'daily' ? dailySeed() : seed;
+  g = new Game(actualSeed, mode === 'daily' ? 'standard' : deckId, {
     diff: over?.diff ?? prefs.diff, mode: over?.mode ?? prefs.mode,
     flags: over?.flags ?? prefs.flags,
     // 局长同样在这一刻定死：引导关的课表按八夜排，每日一局按参照档比
@@ -2684,6 +2705,9 @@ function start(seed: number, deckId = pickedDeck, over?: { diff?: Diff; mode?: M
     // flag 关掉时连 id 都不传：等于这个功能不存在
     signature: prefs.flags.draft ? prefs.signature : '',
   });
+  seenSets = null;
+  seenGrowth.clear();
+  lastChain = null;
   pickedDeck = deckId;
   patronEls.clear();
   need('#patrons').textContent = '';
@@ -2747,6 +2771,7 @@ need('#btnSeedDice').addEventListener('click', () => {
   if (dailyLocked()) return;   // 每日一局不给摇：那就不再是"同一局"了
   draftRerolls = 0;            // 换种子就该重抽候选，留着旧的重掷次数没有意义
   need<HTMLInputElement>('#seedInput').value = String(1000 + Math.floor(Math.random() * 899900));
+  renderDraft();
 });
 // 手打进一个种子也要重抽候选：候选是按种子定的，不换的话屏幕上就是五张错牌
 need<HTMLInputElement>('#seedInput').addEventListener('input', () => {
@@ -2767,6 +2792,10 @@ need('#btnResume').addEventListener('click', () => {
   const loaded = t ? loadSave(t) : null;
   if (!loaded) { need('#resumeNote').textContent = '那份存档读不出来了'; return; }
   g = loaded;
+  const recovered = STORE.recovered;
+  seenSets = null;
+  seenGrowth.clear();
+  lastChain = null;
   patronEls.clear();
   cardEls.clear();
   need('#patrons').textContent = '';
@@ -2775,8 +2804,12 @@ need('#btnResume').addEventListener('click', () => {
   armed = null;
   setBusy(false);
   need('#title').classList.add('hidden');
+  hideIntro();
+  if (g.state.status === 'cleared') { g.openShop(); saveNow(); }
+  place(need('#tableCards'), g.state.table);
   renderAll();
-  toast(`续上第 ${g.state.night} 夜`);
+  if (g.state.status === 'shop') openPanel('shop');
+  toast(recovered ? '已恢复上一份有效进度' : `续上第 ${g.state.night} 夜`);
 });
 need('#btnSound').addEventListener('click', () => {
   prefs.muted = !prefs.muted;
@@ -2798,6 +2831,7 @@ need('#btnAgain').addEventListener('click', () => {
 need('#btnEndless').addEventListener('click', () => {
   need('#endcard').classList.add('hidden');
   continueEndless(g);
+  saveNow();
   resetTable();
   renderAll();
   toast(`无尽经营 · 第 ${g.state.night} 夜`);
@@ -3033,23 +3067,7 @@ const api = {
    *  需求文档的硬约束 2「一行可解释」要有能跑出来的东西，不是靠人读代码。
    *  新功能贡献的那几行用 ★ 标出来。演出路与跳过/抓帧路共用同一份事件流。 */
   chain(): string {
-    if (!lastChain) return '(还没打出过一手)';
-    const rows: string[] = [];
-    for (const e of lastChain.events as ScoreEvent[]) {
-      const a = e.after;
-      const tail = `流水 ${num(a.chips)} × 倍注 ${a.mult} = ${num(a.value)}`;
-      switch (e.t) {
-        case 'hand': rows.push(`  ${HANDS[e.kind].name}（${e.level} 级）起手 → ${tail}`); break;
-        case 'blocked': rows.push(`  ${cardNameOf(e.id)} 被${e.why}挡下 → ${tail}`); break;
-        case 'card': rows.push(`  ${cardNameOf(e.id)}：+${e.addChips} 流水${e.addMult ? ` +${e.addMult} 倍注` : ''}${e.xmult !== 1 ? ` ×${e.xmult}` : ''} → ${tail}`); break;
-        case 'patron': rows.push(`  ${patronById(e.pid).name}${e.note ? `「${e.note}」` : ''}：+${e.addChips} 流水 +${e.addMult} 倍注 ×${e.xmult} → ${tail}`); break;
-        case 'bonus': rows.push(`★ 阈值「${e.source}」：+${e.addChips} 流水 +${e.addMult} 倍注 ×${e.xmult} → ${tail}`); break;
-        case 'shatter': rows.push(`  ${cardNameOf(e.id)} 碎了 → ${tail}`); break;
-        case 'total': rows.push(`  收口 → ${tail}`); break;
-      }
-    }
-    rows.push(`  本手入账 ${num(lastChain.value)}，银钱 ${lastChain.money >= 0 ? '+' : ''}${lastChain.money}`);
-    return rows.join('\n');
+    return scoreText(lastChain, cardNameOf);
   },
   /** 最近一手内核给的三个数。读数判据要拿它当权威值，不能让测试自己算一遍。 */
   lastHand(): { chips: number; mult: number; value: number } | null {

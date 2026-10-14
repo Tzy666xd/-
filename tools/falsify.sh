@@ -24,6 +24,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# 注入只发生在临时副本，强制终止也不会把破坏留在正式源码。
+if [[ "${GUINEA_INJECTION_COPY:-0}" != "1" ]]; then
+  RUN_COPY=$(mktemp -d "${TMPDIR:-/tmp}/guinea-core-injection.XXXXXX")
+  trap 'rm -rf "$RUN_COPY"' EXIT
+  cp -R core web tools "$RUN_COPY/" || exit 2
+  GUINEA_INJECTION_COPY=1 bash "$RUN_COPY/tools/falsify.sh"
+  exit $?
+fi
+
 CORE=core
 BAK=$(mktemp -d)
 cp -R $CORE/. "$BAK/"
@@ -34,6 +43,13 @@ trap 'cleanup; rm -rf "$BAK"' EXIT
 
 # 文件 ||| 原样 ||| 改成 ||| 这条注入本该被哪类判据抓到
 INJ=(
+  "rng.ts|||Math.imul(calls >>> 0, 0x6d2b79f5)|||Math.imul((calls + 1) >>> 0, 0x6d2b79f5)|||可靠性：恢复随机流多走一步"
+  "game.ts|||const night = s.stage < 2 ? s.night : s.night + 1;|||const night = s.night;|||可靠性：跨夜抬注预告仍用旧夜数"
+  "game.ts|||      if (strandingOnSeatLoss(s, index)) {|||      if (false) {|||可靠性：加注惩罚绕过随身容量保护"
+  "game.ts|||      flags: mode === 'daily' ? { ...FLAGS_OFF } : { ...FLAGS_OFF, ...(o.flags ?? {}) },|||      flags: { ...FLAGS_OFF, ...(o.flags ?? {}) },|||可靠性：每日模式能夹带实验规则"
+  "save.ts|||if (!isInt(o.calls, 51, Number.MAX_SAFE_INTEGER)) return null;|||if (!isInt(o.calls, 0, Number.MAX_SAFE_INTEGER)) return null;|||可靠性：随机步数早于开局仍被接收"
+  "save.ts|||if (!ids.every(Number.isSafeInteger) || new Set(ids).size !== ids.length) return null;|||if (!ids.every(Number.isSafeInteger)) return null;|||可靠性：跨牌区重复ID不拒收"
+  "save.ts|||    || !selected.every((id) => handIds.has(id))) return null;|||    || false) return null;|||可靠性：不存在的选中牌不拒收"
   "scoring.ts|||mult = base.mult;|||mult = base.mult + 1;|||牌型基础倍注漂了"
   "hands.ts|||if (sizes[0] === 4) return { kind: 'four'|||if (sizes[0] === 3) return { kind: 'four'|||四条识别退化成三条"
   "hands.ts|||const hi = [...cards].sort((a, b) => b.rank - a.rank)[0];|||const hi = cards[0];|||高牌不再挑最大"
@@ -100,19 +116,19 @@ INJ=(
   "game.ts|||s.handsLeft = lim.hands;|||s.handsLeft = 4;|||吝啬鬼的出牌惩罚失效"
   "save.ts|||if (o.v !== SAVE_VERSION) return null;|||if (false) return null;|||旧版/异版存档被照单全收"
   "save.ts|||&& isInt(x.rank, 2, 14)|||&& isInt(x.rank)|||牌点数的界不再校验"
-  "save.ts|||if (total < 1 || total > 400) return null;|||if (false) return null;|||空牌堆的存档能进来"
+  "save.ts|||if (total < 1 || total > MAX_DECK) return null;|||if (false) return null;|||空牌堆或超过上限的存档能进来"
   "save.ts|||if (new Set((g.seats as unknown[]).map((x) => (x as { pid: string }).pid)).size !== (g.seats as unknown[]).length) return null;|||Ø|||手改存档可以塞重复客人"
   "save.ts|||    if (!isStr(r.kind) || !isNum(r.price) || (r.price as number) < 0) return false;|||    if (!isStr(r.kind)) return false;|||货位价格不查类型与界"
   "save.ts|||      if (!isStr(r.pid) || !PID_SET.has(r.pid)) return false;|||      if (false) return false;|||货位里不存在的客人进得来"
   "save.ts|||    if (typeof r.sold !== 'boolean') return false;|||    if (false) return false;|||货位不再核对 sold 类型"
   "save.ts|||    return isInt(r.night, 1) && isStr(r.stage) && KIND_NAME_SET.has(r.stage)|||    return isInt(r.night, 1) && isInt(r.stage, 0, 2)|||账本 stage 按数字校验，打过一场的合法档被整份拒收"
-  "save.ts|||      && isStr(r.label) && isNum(r.target) && isNum(r.money);|||      && isNum(r.target) && isNum(r.money);|||账本行的阶段名不再核对白名单"
+  "save.ts|||      && isStr(r.label) && isNum(r.target) && isNum(r.money)|||      && isNum(r.target) && isNum(r.money)|||账本行的阶段名不再核对白名单"
   "game.ts|||  add(diffById(s.diff).mods);|||Ø|||难度那一层根本没叠进限额表"
   "game.ts|||    money: 6,|||    money: 0,|||手松档的起手银钱没给"
   "game.ts|||    mods: { hands: 1, discards: 1, interestCap: 2, targetScale: .72, priceScale: .85 },|||    mods: { hands: 1, discards: 1, interestCap: 2, priceScale: .85 },|||手松档的彩头没变薄"
   "game.ts|||  acc.interestCap = Math.max(0, acc.interestCap);|||Ø|||苛刻+高利贷把利息上限压成负数"
   "game.ts|||    const mode: Mode = modeById(o.mode ?? (o.endless ? 'endless' : 'run')).id;|||    const mode: Mode = o.mode ?? 'run';|||endless 参数不再折算成模式"
-  "game.ts|||      endless: mode === 'endless' || !!o.endless, diff, mode, log: [],|||      endless: false, diff, mode, log: [],|||无尽模式开局就被标成正局"
+  "game.ts|||      endless: mode !== 'daily' && (mode === 'endless' || !!o.endless), diff, mode, log: [],|||      endless: false, diff, mode, log: [],|||无尽模式开局就被标成正局"
   "game.ts|||  return ((y * 10000 + m * 100 + day) % 999983) + 17;|||  return 17;|||每日一局的种子不再随日期变"
   "game.ts|||  if (s.mode !== 'practice') return false;|||  return true;|||非修行档也被无限续命"
   "game.ts|||s.claimed = s.claimed.filter((id) => THRESHOLDS.find((d) => d.id === id)?.carryOver === true);|||s.claimed = [];|||P0-3 carryOver=true 的换场没保留"
@@ -227,8 +243,7 @@ INJ=(
   "game.ts|||  if (!s.flags.events || s.status !== 'playing') return null;\n  const hit = autoPick(eventChoices(g));|||  const hit = autoPick(eventChoices(g));|||「让牌局自决」不看状态与开关"
   "game.ts|||  if (!eventById(id)) { s.pendingEvent.splice(at, 1); return null; }|||  if (false) { s.pendingEvent.splice(at, 1); return null; }|||认不出的候选 id 不摘掉：它会一直堵着出牌与弃牌（死局）"
   "game.ts|||  if (!hit) { s.pendingEvent = []; return null; }|||  if (!hit) { return null; }|||自决遇到全是假 id 的候选时不清待决，牌局就此锁死"
-  "game.ts|||  syncSignature(s);           // 卖掉的正是签名宾时，当场就不该再宣称他在座|||Ø|||卖掉签名宾之后 state.signature 还指着那位（只有读档才清）"
-  "game.ts|||      syncSignature(s);\n      if (op.refund)|||      if (op.refund)|||事件请走签名宾之后 signature 还留着"
+  "game.ts|||  const seat = s.seats.splice(index, 1)[0];\n  syncSignature(s);|||  const seat = s.seats.splice(index, 1)[0];|||离席后签名宾标记残留（卖出、事件与惩罚共用）"
   "save.ts|||  if (!g.state.flags.events) {\n    g.state.eventAt = 0;|||  if (false) {\n    g.state.eventAt = 0;|||关着开关的存档照样带着事件的账读进来（五格没清零）"
   # ── 局长（3～15 夜）：曲线、判胜、候选偏置、存档边界 ───────────
   "lengths.ts|||  const n = Math.min(Math.max(night, 1), nights);|||  const n = night;|||无尽推到最后一夜之后，长档的曲线外推成负数彩头"
@@ -239,7 +254,7 @@ INJ=(
   "game.ts|||    const nights = mode === 'daily' ? DEFAULT_NIGHTS : clampNights(o.nights ?? DEFAULT_NIGHTS);|||    const nights = clampNights(o.nights ?? DEFAULT_NIGHTS);|||每日一局被人选的局长搅了，「同一天同一局」就不成立（构造口换成 nights/want 两行之后锚点跟着走）"
   "game.ts|||    if (s.night >= s.nights && !s.endless) { s.status = 'won'; return; }|||    if (s.night >= FINAL_NIGHT && !s.endless) { s.status = 'won'; return; }|||判胜还写死八夜：三夜档赢不了，十五夜档提前散场"
   "game.ts|||  add({ targetScale: nightScale(s.nights, s.night) });|||  void 0;|||局长曲线根本没进限额表（选几夜都是一个难度）"
-  "save.ts|||      night: s.night, nights: s.nights,|||      night: s.night,|||局长存不出去：读档回到八夜"
+  "save.ts|||      nights: s.nights,|||Ø|||局长存不出去：读档回到八夜"
   "save.ts|||  if (g.nights !== undefined && (!isInt(g.nights, 3, 15) || g.nights !== clampNights(g.nights))) return null;|||  if (false) return null;|||存档里写坏的局长被照单全收"
   "save.ts|||  'eventAt', 'nightActions', 'pendingEvent', 'events', 'eventMods', 'nights',|||  'eventAt', 'nightActions', 'pendingEvent', 'events', 'eventMods',|||nights 不在读档白名单里：这一格读回来就被丢掉"
   "draft.ts|||  if (nights >= 6 && nights <= 9) return 1;|||  if (false) return 1;|||参照档（六到九夜）的开局候选被局长偏置搅动，老种子不再是老局面"
@@ -356,7 +371,7 @@ PY
 done
 
 echo "----"
-echo "注入 $((total - skipped)) 条：盲区 $blind，语法噪声 $noise，坏条目 $bad，仅靠运行时崩溃发现的 $crashed"
+echo "注入 $((total - skipped)) 条：盲区 ${blind}，语法噪声 ${noise}，坏条目 ${bad}，仅靠运行时崩溃发现的 $crashed"
 if [[ -n "${ONLY:-}" ]]; then
   echo "（ONLY 过滤：表里共 $total 条，跳过 $skipped 条——这不是全量门禁）"
   if [[ $((total - skipped)) -eq 0 ]]; then

@@ -970,14 +970,14 @@ t('模式四种且 id 唯一', MODES.length === 4 && new Set(MODES.map((m) => m.
 }
 {
   // 存档要带得上难度与模式
-  const g = new Game(5155, 'steady', { diff: 'grudge', mode: 'daily' });
+  const g = new Game(5155, 'steady', { diff: 'grudge', mode: 'run' });
   const back = deserializeSave(serializeSave(g));
-  t('难度与模式进得了存档', back !== null && back.state.diff === 'grudge' && back.state.mode === 'daily');
+  t('难度与模式进得了存档', back !== null && back.state.diff === 'grudge' && back.state.mode === 'run');
   const txt = serializeSave(g);
   t('存档里写坏难度要被拒', deserializeSave(txt.replace('"diff":"grudge"', '"diff":"easy"')) === null);
-  t('存档里写坏模式要被拒', deserializeSave(txt.replace('"mode":"daily"', '"mode":"<script>"')) === null);
+  t('存档里写坏模式要被拒', deserializeSave(txt.replace('"mode":"run"', '"mode":"<script>"')) === null);
   // v1 老档没有这两个字段：要退回默认而不是整份拒收
-  const legacy = txt.replace('"diff":"grudge",', '').replace('"mode":"daily",', '');
+  const legacy = txt.replace('"diff":"grudge",', '').replace('"mode":"run",', '');
   const lb = deserializeSave(legacy);
   t('没有难度字段的旧档照样能读并退回标准', lb !== null && lb.state.diff === 'standard');
 }
@@ -3322,6 +3322,9 @@ const injected: string[] = [];
       return z.rand.calls > c0;
     })());
 }
+
+const { runReliability } = await import('../tools/reliability.mjs');
+runReliability(t);
 
 console.log(`正向 ${pass} 条通过，失败 ${fails.length} 条`);
 if (fails.length) {

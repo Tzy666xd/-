@@ -3,7 +3,7 @@
 //
 // 读档路径按"外部输入不可信"处理：localStorage 里的东西可能是手改过的、旧版本的、
 // 或者干脆是乱码。任何一处不合结构就返回 null，绝不让界面拿到半个对象。
-import { Game, STAGE_KIND, DIFFS, MODES } from './game.ts';
+import { Game, STAGE_KIND, DIFFS, MODES, MAX_DECK } from './game.ts';
 import type { GameState } from './game.ts';
 import type { Card } from './hands.ts';
 import { HANDS, SUITS } from './hands.ts';
@@ -56,7 +56,7 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   if (o.v !== SAVE_VERSION) return null;
-  if (!isInt(o.calls, 0)) return null;
+  if (!isInt(o.calls, 51, Number.MAX_SAFE_INTEGER)) return null;
   const s = o.state;
   if (typeof s !== 'object' || s === null) return null;
   const g = s as Record<string, unknown>;
@@ -83,6 +83,10 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
     if (!isArr(g[k]) || !(g[k] as unknown[]).every(cardOk)) return null;
   }
   if (!isArr(g.chosen) || !(g.chosen as unknown[]).every((x) => isInt(x, 0))) return null;
+  const handIds = new Set((g.hand as Card[]).map((c) => c.id));
+  const selected = g.chosen as number[];
+  if (selected.length > 5 || new Set(selected).size !== selected.length
+    || !selected.every((id) => handIds.has(id))) return null;
   if (!isArr(g.seats) || !(g.seats as unknown[]).every((x) => {
     if (typeof x !== 'object' || x === null) return false;
     const r = x as Record<string, unknown>;
@@ -129,7 +133,8 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
     if (typeof x !== 'object' || x === null) return false;
     const r = x as Record<string, unknown>;
     return isInt(r.night, 1) && isStr(r.stage) && KIND_NAME_SET.has(r.stage)
-      && isStr(r.label) && isNum(r.target) && isNum(r.money);
+      && isStr(r.label) && isNum(r.target) && isNum(r.money)
+      && ['best', 'reward', 'profit', 'raised', 'rep'].every((k) => isNum(r[k]));
   })) return null;
   for (const k of ['books', 'handUse', 'discovered', 'settlement', 'log'] as const) {
     const v = g[k];
@@ -139,6 +144,15 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
     } else if (!isArr(v)) return null;
   }
   if (!isArr(g.discovered) || !(g.discovered as unknown[]).every((k) => isStr(k) && KIND_SET.has(k))) return null;
+  if (!(g.settlement as unknown[]).every((x) => {
+    if (typeof x !== 'object' || x === null) return false;
+    const r = x as Record<string, unknown>;
+    return isStr(r.label) && isNum(r.amount)
+      && (r.pid === undefined || (isStr(r.pid) && PID_SET.has(r.pid)));
+  }) || !(g.log as unknown[]).every(isStr)) return null;
+  for (const k of ['books', 'handUse'] as const) {
+    if (!Object.keys(g[k] as object).every((id) => KIND_SET.has(id))) return null;
+  }
   // 阈值认领账：只认表里存在的 id。写了不存在的 id 一律丢掉（不当整份存档作废），
   // 因为这条不影响牌的正确性，只是少发一次奖
   if (g.claimed !== undefined) {
@@ -193,7 +207,10 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   // 手牌与牌堆的总数要自洽：牌只能被移出或复制，不能凭空多出来
   const total = (g.deck as unknown[]).length + (g.hand as unknown[]).length
     + (g.table as unknown[]).length + (g.discardPile as unknown[]).length;
-  if (total < 1 || total > 400) return null;
+  if (total < 1 || total > MAX_DECK) return null;
+  const ids = ['deck', 'hand', 'table', 'discardPile']
+    .flatMap((key) => (g[key] as Card[]).map((c) => c.id));
+  if (!ids.every(Number.isSafeInteger) || new Set(ids).size !== ids.length) return null;
   return { state: s as GameState, calls: o.calls as number };
 }
 
@@ -208,7 +225,7 @@ export function serialize(g: Game): string {
       deck: s.deck, hand: s.hand, table: s.table, chosen: s.chosen, discardPile: s.discardPile,
       seats: s.seats, consumables: s.consumables, books: s.books, handUse: s.handUse,
       vouchers: s.vouchers, bossId: s.bossId,
-      night: s.night, nights: s.nights,
+      nights: s.nights,
       handsLeft: s.handsLeft, discardsLeft: s.discardsLeft, handIndex: s.handIndex,
       discardsUsed: s.discardsUsed, score: s.score,
       shop: s.shop, rerolls: s.rerolls, ledger: s.ledger, discovered: s.discovered,
@@ -277,8 +294,7 @@ export function deserialize(text: string): Game | null {
   const all = [...g.state.deck, ...g.state.hand, ...g.state.table, ...g.state.discardPile];
   g.bumpUid(Math.max(0, ...all.map((c) => c.id)) + 1);
   // 随机流快进到存档现场：构造时已经消耗过的次数要一并算进去
-  const target = Math.max(0, Math.min(400000, ok.calls - g.rand.calls));
-  for (let i = 0; i < target; i++) g.rand.next();
+  g.rand.restoreCalls(ok.calls);
   return g;
 }
 

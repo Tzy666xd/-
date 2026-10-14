@@ -161,7 +161,78 @@
 
   var mode = new URLSearchParams(location.search).get('uitest') || 'again';
 
-  if (mode === 'keys') {
+  if (mode === 'reliable') {
+    H.start(4242);
+    click('#tray .card');
+    click('#btnPlay');
+    var playedState = JSON.parse(read('guinea.save.v1'));
+    must('普通出牌立即保存实际分数与出牌次数', playedState.state.score===H.game.state.score
+      && playedState.state.handsLeft===H.game.state.handsLeft && playedState.state.score>0);
+    must('普通出牌立即保存随机流位置', playedState.calls===H.game.rand.calls);
+    click('#btnLedger');
+    must('玩家能在账本回看这一手的拆账',q('#ledgerBody .score-trace').textContent.indexOf('本手入账')>=0);
+    H.closePanels();
+    click('#btnResume');
+    must('立即续局不回退分数与次数',H.game.state.score===playedState.state.score
+      && H.game.state.handsLeft===playedState.state.handsLeft);
+    must('立即续局随机流位置不变',H.game.rand.calls===playedState.calls);
+    must('卡牌提供可访问按钮和选中状态',q('#tray .card').getAttribute('role')==='button'
+      && q('#tray .card').hasAttribute('aria-label') && q('#tray .card').getAttribute('aria-pressed')==='false');
+    var accessibleCard=q('#tray .card');
+    key(accessibleCard,'Enter');
+    must('卡牌回车可选中并同步可访问状态',H.game.state.chosen.length===1
+      && accessibleCard.getAttribute('aria-pressed')==='true');
+    key(accessibleCard,' ');
+    must('卡牌空格取消选择，不误触出牌',H.game.state.chosen.length===0
+      && H.game.state.handsLeft===playedState.state.handsLeft);
+    click('#tray .card'); click('#btnDiscard');
+    var discardedState=JSON.parse(read('guinea.save.v1'));
+    must('弃牌立即保存次数和新手牌',discardedState.state.discardsLeft===H.game.state.discardsLeft
+      && JSON.stringify(discardedState.state.hand)===JSON.stringify(H.game.state.hand));
+    H.game.state.consumables=[{t:'book',id:'pair'}];H.render();click('#consumables .item');
+    var bookState=JSON.parse(read('guinea.save.v1'));
+    must('使用牌谱立即保存等级与物品消耗',bookState.state.books.pair===2&&bookState.state.consumables.length===0);
+    H.game.state.consumables=[{t:'letter',id:'fortune'}];H.render();click('#consumables .item');
+    must('使用引荐信立即保存银钱和物品',JSON.parse(read('guinea.save.v1')).state.money===H.game.state.money
+      && JSON.parse(read('guinea.save.v1')).state.consumables.length===0);
+    var backup=JSON.parse(read('guinea.save.v1.backup'));
+    store('guinea.save.v1','broken');click('#btnResume');
+    must('主档坏了能从有效备份续局',H.game.state.seed===backup.state.seed&&H.game.rand.calls===backup.calls);
+    must('恢复备份时玩家得到明确提示',q('#notice').textContent.indexOf('有效进度')>=0);
+    H.start(4242);
+    var oldSet=Storage.prototype.setItem;
+    try {
+      Storage.prototype.setItem=function(){throw new Error('test quota');};
+      click('#tray .card');click('#btnDiscard');
+      must('写入失败时留下可见提示',q('#saveStatus').classList.contains('failed'));
+    } finally { Storage.prototype.setItem=oldSet; }
+    H.start(1,'patrician');H.game.state.flags.sets=true;
+    H.seat('hobbs');H.seat('oracle');H.game.openShop();
+    try { H.renderShop();must('首次进店已有套装不报错',true); }
+    catch(e){must('首次进店已有套装不报错：'+e.message,false);}
+    must('首次进店已有套装有实际名单',q('#shopBody .sets-box').textContent.indexOf('同好雅集')>=0);
+    H.start(4242);Object.assign(H.game.state,{nights:3,stage:2,status:'shop'});H.renderShop();
+    var step=document.querySelectorAll('#shopBody .step')[1];
+    must('三夜局跨夜抬注显示1800分',step.textContent.indexOf('1,800')>=0);
+    step.click();click('#shopBody .leave');
+    must('抬注预告与实际进入彩头一致',q('#targetVal').textContent==='1,800');
+    H.start(4242,'standard');H.game.state.score=1000;
+    click('#tray .card');click('#btnPlay');
+    var cleared=JSON.parse(read('guinea.save.v1'));
+    must('结清动画前进度已含完整赏金账本',cleared.state.status==='cleared'&&cleared.state.ledger.length===1);
+    click('#btnResume');
+    must('结清途中恢复直接进店，不重复结清',H.game.state.status==='shop'
+      && q('#shop').classList.contains('open')&&H.game.state.money===cleared.state.money
+      && H.game.state.ledger.length===1&&q('#tableCards .card')!==null);
+    click('#btnResume');
+    must('铺子再次恢复不重新摇货或随机流',H.game.rand.calls===JSON.parse(read('guinea.save.v1')).calls);
+    H.closePanels();H.renderPickers();
+    document.querySelectorAll('#modes .pick')[2].click();
+    H.start(99);
+    must('菜单开局路径也遵守今日种子',H.game.state.seed===Number(q('#seedInput').value));
+    must('每日模式锁定标准难度和功能',H.game.state.diff==='standard'
+      && Object.values(H.game.state.flags).every(function(v){return v===false;})&&H.game.state.seats.length===0);
+  } else if (mode === 'keys') {
     // ── 输入框焦点与快捷键 ────────────────────────────────────
     must('开场标题页可见', !q('#title').classList.contains('hidden'));
     // 这条靠文档级 fixture 存档：启动时就应该查出"有上一局可续"
@@ -771,6 +842,19 @@
         // 课表与 tools/guide-check.mjs 都是按"最短三夜"排的：偏好里选了 15 夜
         //（BOOT_FIRST 就是故意留的这个），教学局不许跟着跑
         must('教学局锁三夜，不跟着偏好里的轮数跑（实际 ' + st.nights + '）', st.nights === 3);
+        // 高大的锚点仍在上半屏时，直接放在其下会越出视口；复现拥挤窗口的几何压力。
+        var boardHost=q('.scoreline'), boardStyle=boardHost.getAttribute('style');
+        try {
+          boardHost.style.cssText='position:fixed;top:0;bottom:auto;left:100px;width:900px;height:'+Math.max(200,innerHeight-80)+'px;';
+          H.render();
+          var largeAnchor=boardHost.getBoundingClientRect(), coachBox=q('.coach').getBoundingClientRect();
+          must('几何样本确实在锚点下方没有足够空间',largeAnchor.top===0
+            && largeAnchor.height>=innerHeight-80&&largeAnchor.bottom+coachBox.height>innerHeight);
+          must('大锚点下教学气泡仍完整留在视口内',H.guide().visible&&H.guide().inViewport);
+        } finally {
+          if(boardStyle===null)boardHost.removeAttribute('style');else boardHost.setAttribute('style',boardStyle);
+          H.render();
+        }
         // ── 局 A：按课程表一节一节上到结业 ──────────────────────
         // 为什么改成"表驱动"：原来这里是一串手写嵌套回调，十四节课就得重写一次链路，
         // 而且课程表加了课、改了顺序，这串回调还照样绿——测试与内容各说各话。

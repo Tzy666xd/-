@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Mac App Store 要求 App Sandbox。这个 App 不联网、不读写用户文件、不加载远程内容，
      所以沙盒只需要开起来，不需要任何 additional entitlement。
-     本地 ad-hoc 构建也带同一份，保证"本机能跑"和"能上架"走的是同一条路径。 -->
+     仅 CHANNEL=app-store 使用；本地试玩与 Developer ID 公证包不带沙盒。 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>

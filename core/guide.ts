@@ -73,6 +73,9 @@ export interface Facts {
   stage: number;
   /** 这一场要做出的彩头 */
   target: number;
+  /** 已经由玩法内核入账的本场分数，剩余目标必须扣除它。 */
+  score: number;
+  gap: number;
   /** 这一场的头人（贵客局才有） */
   boss: string;
   bossWhy: string;
@@ -114,6 +117,8 @@ export const stateFacts = (s: GameState): Omit<Facts, 'started'> => {
     nights: s.nights,
     stage: s.stage,
     target: targetOf(s),
+    score: s.score,
+    gap: Math.max(0, targetOf(s) - s.score),
     boss: b?.name ?? '',
     bossWhy: b?.blurb ?? '',
     consumables: s.consumables.length,
@@ -152,10 +157,10 @@ export const LESSONS: Lesson[] = [
   {
     id: 'tray', req: 'pick', anchor: 'tray',
     title: '先凑一个真牌型',
-    body: '一次最多选 5 张，选上就当场报牌型与倍注：越难凑的牌型倍注越高，还会随打随升级。',
+    body: '一次最多选 5 张；两张同点数是对子，五张连续点数是顺子，五张同花色是同花。牌谱用来升级牌型。',
     dyn: (f) => (f.kind && f.kind !== HIGH
       ? `现在这手是「${f.kind}」：${f.kindChips} 流水 × ${f.kindMult} 倍注，先记下这两个数。`
-      : '一次最多选 5 张。选上就当场报牌型与倍注：越难凑的倍注越高，还会随打随升级。'),
+      : '一次最多选 5 张。先找两张同点数的牌凑对子；五张连续点数是顺子，五张同花色是同花。牌型靠牌谱升级。'),
     todo: '选两张同点数的牌，看牌桌报出「对子」',
     open: firstStage,
     done: (f) => f.chosen >= 2 && f.kind !== null && f.kind !== HIGH,
@@ -181,9 +186,9 @@ export const LESSONS: Lesson[] = [
   {
     id: 'stage', req: 'read', anchor: 'scoreline',
     title: '一场要打好几手，用完次数就失手',
-    body: '出牌与弃牌各有次数；次数用完还没漫过彩头线就散场，漫过去则超出的部分和没用完的次数都折成银钱。',
-    dyn: (f) => `这一场还差 ${Math.max(0, f.target - 0)} 分之内慢慢打：出牌、弃牌各有次数，`
-      + `用完次数还没漫过 ${f.target} 分就散场。漫过去了，超出的部分和没用完的次数都折成银钱。`,
+    body: '每手的分数累加。出牌用完还没过线就失手；开局有一次免费重做，用光才散场。过线后领取赏金、利息和盈余折现。',
+    dyn: (f) => `已经做出 ${f.score} / ${f.target} 分，还差 ${f.gap} 分。每手分数累加，弃牌只换牌。`
+      + '出牌用完还没过线就失手；开局有一次免费重做，用光才散场。过线后领取赏金、利息和盈余折现。',
     todo: '接着凑牌型接着打，直到水位漫过头顶那条线',
     open: (f) => f.started && !f.inShop,
     // 一把就打穿的那一手不需要这节课：它和上一节同时满足，自动翻页

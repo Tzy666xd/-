@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 APP="dist/几尼.app"
 BIN="$APP/Contents/MacOS/Guinea"
-OUT="shots"
+OUT="${SHOT_OUT:-shots}"
 W="${SHOT_WINDOW:-1500x900}"
 mkdir -p "$OUT"
 
@@ -36,7 +36,7 @@ CASH="$S&seats=hobbs,rent,house&pick=3,6"
 
 echo "抓帧："
 # 标题页样张要的是牌桌本体：给它一份"已经上过课"的偏好，第一次开机那张课表卡就不拦路
-PREF_TAUGHT='try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true}")}catch(e){}'
+PREF_TAUGHT='try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true}))}catch(e){}'
 shot 01-title   "seed=20261009"                    900 "$PREF_TAUGHT"
 # 第一次开机的课表卡、以及第一节课的气泡：这两张给人判断「课上得清楚不清楚」
 shot 20-intro    "snap=1&intro=1"                    900
@@ -47,17 +47,17 @@ shot 21-lesson   "snap=1&lesson=1"                   900
 shot 22-events   "snap=1&events=1"                   1400
 # 局长那一排：13 格要一行装下（装不下就把"入席"那颗顶到屏幕外），高亮必须落在真会跑的数上。
 # 散场卡的"几夜通吃"跟着局长走，不许再写死八夜。
-shot 23-lengths  "seed=20261009"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"nights\":15,\"flags\":{\"draft\":true}}")}catch(e){}'
-shot 24-end-15n  "snap=1&seed=4242&end=win"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"nights\":15}")}catch(e){}'
+shot 23-lengths  "seed=20261009"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,nights:15,flags:{draft:true}}))}catch(e){}'
+shot 24-end-15n  "snap=1&seed=4242&end=win"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,nights:15}))}catch(e){}'
 # 档位专属牌组：选三夜就该只看见「一手到位」那一副（牌组一排随局长变）
-shot 25-deck-3n  "seed=20261009"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"nights\":3,\"deck\":\"flash\"}")}catch(e){}'
+shot 25-deck-3n  "seed=20261009"  900 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,nights:3,deck:"flash"}))}catch(e){}'
 # 出牌与弃牌以前只有空格 / X 按得动：这张看两颗按钮在读数下面站得对不对（别压住牌、别顶掉提示行）
 shot 26-actions  "$CASH"                           700
 # 牌面审片：52 张一次摆出来看点位、人头双头与四套画法下的色（走的是生产那套 syncCard）
-shot 27-cardsheet "snap=1&cards=1"  800 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"tutorial\":false}")}catch(e){}'
-shot 28-cards-eng "snap=1&cards=1"  800 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"tutorial\":false,\"style\":\"engraving\"}")}catch(e){}'
+shot 27-cardsheet "snap=1&cards=1"  800 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,tutorial:false}))}catch(e){}'
+shot 28-cards-eng "snap=1&cards=1"  800 'try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,tutorial:false,style:"engraving"}))}catch(e){}'
 # 牌背审片：扣过来那一面（六张同屏顺带验"六份同名纹样"那类坑，所以纹样走 CSS 不走 SVG id）
-PREF_PLAIN='try{localStorage.clear();localStorage.setItem("guinea.prefs.v1","{\"guide\":true,\"tutorial\":false}")}catch(e){}'
+PREF_PLAIN='try{localStorage.clear();localStorage.setItem("guinea.prefs.v1",JSON.stringify({guide:true,tutorial:false}))}catch(e){}'
 shot 29-backs    "snap=1&backs=1"  800 "$PREF_PLAIN"
 # 抽牌礼：三选一里要挑一张牌的那条，玩家先看见的是一排扣过来的牌（走的是点事件卡那一扇门）
 shot 30-fan      "snap=1&events=1&fan=1"  1600
@@ -87,7 +87,14 @@ for st in default deco engraving leather; do
   case $st in default) q="$STYLE_SCENE";; *) q="$STYLE_SCENE&style=$st";; esac
   shot "style-$st" "$q" 900
 done
-python3 tools/stylesheet.py shots
+rm -f "$OUT/31-score-detail.png"
+"$BIN" --shot "$OUT/31-score-detail.png" --window "$W" --delay 700 --burst 0 \
+  --boot "$PREF_PLAIN" --query 'snap=1' \
+  --anim "window.__H.start(4242);document.querySelector('#tray .card').click();document.querySelector('#btnPlay').click();document.querySelector('#btnLedger').click();document.querySelector('#ledgerBody details').open=true;" >/dev/null 2>/tmp/shot.err
+[[ -s "$OUT/31-score-detail.png" ]] || { echo 'FAIL 31-score-detail'; fails=$((fails + 1)); }
+[[ $fails -eq 0 ]] || { echo "SHOTS FAIL：${fails} 张没生成"; exit 1; }
+python3 tools/stylesheet.py "$OUT" || exit 1
 
 
-python3 tools/sheet.py "$OUT"
+python3 tools/sheet.py "$OUT" || exit 1
+echo 'SHOTS OK：全部抓帧完成'

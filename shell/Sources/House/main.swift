@@ -136,6 +136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     log("资源目录", webRoot.path, FileManager.default.fileExists(atPath: webRoot.path) ? "存在" : "缺失")
 
     let config = WKWebViewConfiguration()
+    // 测试的 clear()/fixture 只能影响临时数据，不能覆盖玩家的真实存档和偏好。
+    if shotPath != nil || uiTestPath != nil || probeBlank { config.websiteDataStore = .nonPersistent() }
     config.setURLSchemeHandler(ResourceHandler(webRoot: webRoot), forURLScheme: SCHEME)
     if !probeBlank { config.userContentController.add(self, name: "log") }   // 二分：探针模式下不注册消息处理器
     // 只用公开 API：对私有键做 KVC 既是审核驳回点，在 App Sandbox 下还会让 WebKit 卡住。
