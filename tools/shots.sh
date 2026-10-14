@@ -20,7 +20,9 @@ cp -R web/gen "$APP/Contents/Resources/web/gen"
 
 fails=0
 shot() {
-  local name="$1" query="$2" delay="${3:-700}" boot="${4:-try{localStorage.clear()}catch(e){}}"
+  local name="$1" query="$2" delay="${3:-700}"
+  local defaultBoot='try{localStorage.clear()}catch(e){}'
+  local boot="${4:-$defaultBoot}"
   rm -f "$OUT/$name.png"
   # 每次抓图前清掉本机偏好：不然上一轮 uitest 留下的"暖皮革/减少动效"会串进样张
   "$BIN" --shot "$OUT/$name.png" --window "$W" --delay "$delay" \
@@ -92,6 +94,17 @@ rm -f "$OUT/31-score-detail.png"
   --boot "$PREF_PLAIN" --query 'snap=1' \
   --anim "window.__H.start(4242);document.querySelector('#tray .card').click();document.querySelector('#btnPlay').click();document.querySelector('#btnLedger').click();document.querySelector('#ledgerBody details').open=true;" >/dev/null 2>/tmp/shot.err
 [[ -s "$OUT/31-score-detail.png" ]] || { echo 'FAIL 31-score-detail'; fails=$((fails + 1)); }
+scene() {
+  local name="$1" script="$2" query="${3:-snap=1}"
+  rm -f "$OUT/$name.png"
+  "$BIN" --shot "$OUT/$name.png" --window "$W" --delay 700 --burst 0 \
+    --boot "$PREF_PLAIN" --query "$query" --anim "$script" >/dev/null 2>/tmp/shot.err
+  [[ -s "$OUT/$name.png" ]] || { echo "FAIL $name"; fails=$((fails + 1)); }
+}
+scene 32-start-options "document.documentElement.dataset.snap='1';window.__H.setPrefFlag('draft',true);document.querySelector('#startOptions').open=true;" 'seed=20261009'
+scene 33-patrons "document.querySelector('#btnCodex').click();document.querySelector('[data-tab=patrons]').click();"
+scene 34-deck "document.querySelector('#btnDeck').click();"
+scene 35-loss-review "var H=window.__H;H.start(4242);document.querySelector('#tray .card').click();document.querySelector('#btnPlay').click();H.game.state.status='lost';H.game.state.handsLeft=0;H.showEnd(false);"
 [[ $fails -eq 0 ]] || { echo "SHOTS FAIL：${fails} 张没生成"; exit 1; }
 python3 tools/stylesheet.py "$OUT" || exit 1
 

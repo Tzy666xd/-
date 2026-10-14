@@ -25,6 +25,7 @@
         <b class="num" id="targetVal">300</b>
       </div>
       <button class="brass-btn" id="btnCodex" title="牌型图鉴 (K)">图鉴</button>
+      <button class="brass-btn" id="btnDeck" title="查看本局完整牌组">牌组</button>
       <button class="brass-btn" id="btnLedger" title="账本 (L)">账本</button>
       <button class="brass-btn" id="btnShop" title="铺子 (S)">铺子</button>
       <button class="brass-btn icon" id="btnSound" title="静音 (M)">♪</button>
@@ -109,19 +110,23 @@
 
 <div id="title" class="overlay">
   <div class="deed">
+    <div class="start-scroll">
     <div class="crest big" aria-hidden="true"></div>
     <h1>几尼</h1>
     <p class="sub">一间维多利亚时代的私人牌局 · 你替它做庄</p>
+    <div class="pickrow"><span class="lbl2">玩法</span><div class="pickers" id="modes"></div></div>
+    <p class="picknote" id="pickNote"></p>
+    <details class="rules-fold" id="startOptions">
+    <summary>自定牌局 · 难度、轮数、牌组与种子</summary>
     <div class="seedrow" id="seedRow">
       <label for="seedInput">种子</label>
       <input id="seedInput" value="20261009" spellcheck="false" inputmode="numeric">
       <button id="btnSeedDice" class="brass-btn icon" title="换一个种子">⟳</button>
     </div>
-    <div class="pickrow"><span class="lbl2">玩法</span><div class="pickers" id="modes"></div></div>
     <div class="pickrow"><span class="lbl2">难度</span><div class="pickers" id="diffs"></div></div>
     <div class="pickrow"><span class="lbl2">轮数</span><div class="pickers" id="lengths"></div></div>
-    <p class="picknote" id="pickNote"></p>
     <div class="pickrow"><span class="lbl2">牌组</span><div class="pickers" id="decks"></div></div>
+    </details>
     <div class="draftbox hidden" id="draftBox">
       <div class="draft-head">
         <span class="lbl2">开局请一位</span>
@@ -138,17 +143,21 @@
         <p>本局还有一条原版没有的规矩：你可以<b>主动抬注</b>，把下一夜的彩头抬高去搏更厚的赏金与更高的声望。</p>
       </div>
     </details>
+    </div>
+    <div class="start-footer">
     <div class="row-btns">
       <button class="brass-btn big" id="btnStart">入 席</button>
       <button class="brass-btn big" id="btnResume" hidden>继续上一局</button>
     </div>
     <div class="resume-note" id="resumeNote" hidden></div>
     <div class="keys">ⓘ 命名仍是占位，等你定。</div>
+    </div>
   </div>
 </div>
 
 <div id="guideIntro" class="overlay hidden">
   <div class="deed">
+    <div class="start-scroll">
     <div class="crest big" aria-hidden="true"></div>
     <h1>第 一 课</h1>
     <p class="sub">头一回来，先在牌桌上坐两分钟 · 十四节小课，全程随时可退、自动存档</p>
@@ -162,19 +171,21 @@
       </ul>
     </div>
     <div class="intro-block">
-      <p class="intro-h">标题页那四排各管什么</p>
+      <p class="intro-h">开局怎么选</p>
       <ul>
         <li><b>玩法</b>：经营（打满轮数就散场）· 无尽 · 每日一局 · 修行（不会输，拿来试牌）。</li>
-        <li><b>难度</b>：手松 / 标准 / 苛刻——改的就是彩头线的高低。</li>
+        <li>展开<b>自定牌局</b>可调整难度、轮数、牌组与种子。<b>难度</b>：手松 / 标准 / 苛刻——改的就是彩头线的高低。</li>
         <li><b>轮数</b>：一局打几夜（默认八夜，可 3～15 夜）。夜越多<b>终点越高</b>，不是拖时间。</li>
         <li><b>牌组</b>：起手就改写规矩的一副牌；<b>换了轮数会多出一副只有那一档能用的</b>。</li>
       </ul>
     </div>
     <p class="sub">十四节课带你亲手做一遍：牌桌上（凑牌型 · 弃牌 · 出牌 · 打穿一场）→ 铺子里（请客人 · 买一件应急的 · 抬注）→ 往后的夜（客人逐个开口 · 头人刁难 · 账本怎么看）。</p>
     <p class="picknote">课上打的是同一副牌，不会另开一套规则；课随时能退，退了就是普通一局。</p>
-    <div class="row-btns">
+    </div>
+    <div class="start-footer"><div class="row-btns">
       <button class="brass-btn big" id="btnTakeGuide">上 第 一 课</button>
       <button class="brass-btn" id="btnSkipGuide">我自己开一局</button>
+    </div>
     </div>
   </div>
 </div>
@@ -185,6 +196,7 @@
     <h1 id="endTitle">散 场</h1>
     <p class="sub" id="endSub"></p>
     <div class="summary" id="endSummary"></div>
+    <div id="endReview" class="end-review"></div>
     <div class="event-recap hidden" id="endRecapBox">
       <div class="lbl2">事 件 回 顾</div>
       <div id="endRecap"></div>

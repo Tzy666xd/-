@@ -990,7 +990,8 @@ html[data-snap='1'] .card.dealing { opacity: 1; transform: none; }
 .draftbox { margin-top: 14px; }
 .draftbox.hidden { display: none; }
 .draft-head { display: flex; align-items: center; gap: 12px; }
-.draft-head .lbl2 { font-size: 10px; letter-spacing: .24em; color: #b39a6d; }
+.draft-head .lbl2 { font-size: 11px; letter-spacing: .24em; color: #6d5433; }
+.draft-head .brass-btn.ghost { color: #5b4123; border-color: #a58a58; background: rgba(255, 248, 230, .7); }
 #btnReroll { margin-left: auto; font-size: 11px; padding: 3px 10px; }
 .draft-row { display: flex; gap: 8px; margin-top: 8px; }
 .draft-card {
@@ -1383,3 +1384,48 @@ html[data-sheet='1'] .card { cursor: default; }
 }
 /* 抽定之后其余几张退到暗处：眼睛只跟着翻过来的那一张走 */
 .fan-row.locked .card:not(.drawn) { opacity: .4; }
+
+/* 查阅与开局：入口常驻，内容在纸面内滚动。 */
+#title .deed, #guideIntro .deed { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.start-scroll { overflow-y: auto; min-height: 0; padding: 25px 30px 8px; }
+.start-footer { flex: 0 0 auto; padding: 14px 22px; border-top: 1px solid #bba67a; background: #eee2c5; }
+.start-footer .row-btns { flex-wrap: wrap; }
+#startOptions[open] > summary { margin-bottom: 14px; }
+#title .pickrow { align-items: flex-start; }
+#title .pickers { flex-wrap: wrap; }
+.reference-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.reference-tabs .pick { letter-spacing: .03em; }
+.reference-note { font-size: 12px; line-height: 1.65; color: #695638; }
+.hand-example { grid-column: 1 / -1; }
+.hand-example p { margin: 6px 0 3px; font-size: 12px; line-height: 1.6; }
+.sample-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.sample-card { padding: 9px 7px; min-width: 37px; text-align: center; border-radius: 4px; background: #fff7e7; color: #25231f; border: 2px solid #6a593a; font-size: 17px; }
+.sample-card.kicker { opacity: .55; border-style: dashed; }
+.sample-card.red, .deck-card.red { color: #8c2030; }
+.reference-search { display: block; font-size: 12px; }
+.reference-search input { display: block; width: 100%; box-sizing: border-box; margin-top: 7px; padding: 9px 10px; border: 1px solid #998054; border-radius: 4px; background: #fff7e7; color: #34281a; font: inherit; font-size: 14px; }
+.catalog-entry { padding: 10px 0; border-bottom: 1px dotted #a99570; }
+.catalog-entry h3 { font-size: 15px; margin: 0 0 5px; }
+.catalog-entry small { color: #79613c; font-size: 11px; }
+.catalog-entry p { margin: 5px 0 0; font-size: 13px; line-height: 1.7; }
+.deck-total { font-size: 14px; font-weight: 600; line-height: 1.7; }
+.deck-composition { font-size: 18px; color: #6b5133; }
+.reference-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.reference-filters label { font-size: 12px; }
+.reference-filters select { display: block; padding: 7px; margin-top: 5px; color: #34281a; background: #fff7e7; border: 1px solid #998054; border-radius: 4px; }
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(73px, 1fr)); gap: 8px; }
+.deck-card { min-height: 70px; padding: 8px 5px; border: 1px solid #b9a17a; border-radius: 5px; background: #fff7e7; text-align: center; color: #25231f; }
+.deck-card b { display: block; font-size: 22px; }
+.deck-card small { display: block; margin-top: 5px; font-size: 10px; color: #6c5838; }
+.end-review { text-align: left; padding: 14px; margin-bottom: 18px; border: 1px solid #baa477; border-radius: 5px; background: #f8edd4; }
+.end-review p, .end-review li { font-size: 12.5px; line-height: 1.75; }
+.end-review p { margin: 0 0 9px; }
+.end-review .review-result { color: #6e1420; font-weight: 600; font-size: 15px; }
+.end-review ul { margin: 0; padding-left: 18px; }
+.reference-tabs button:focus-visible, .reference-filters select:focus-visible, .reference-search input:focus-visible, .rules-fold summary:focus-visible { outline: 2px solid #805722; outline-offset: 3px; }
+@media (max-width: 900px), (max-height: 650px) {
+  .start-scroll { padding: 15px 20px 8px; }
+  #title .crest.big { display: none; }
+  #title .deed h1 { font-size: 32px; }
+  .start-footer { padding: 10px 16px; }
+}

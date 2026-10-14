@@ -5,7 +5,7 @@ import sys, os, glob
 from PIL import Image, ImageDraw
 
 out_dir = sys.argv[1] if len(sys.argv) > 1 else 'shots'
-files = sorted(glob.glob(os.path.join(out_dir, '*.png')))
+files = sorted(f for f in glob.glob(os.path.join(out_dir, '*.png')) if os.path.basename(f) != 'sheet.png')
 if not files:
     print('没有图'); sys.exit(1)
 

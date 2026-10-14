@@ -30,6 +30,8 @@ import type { PatronDef, Edition, Seat } from './core/effects.ts';
 import { serialize as dumpSave, deserialize as loadSave, summarize as sumSave, SAVE_KEY } from './core/save.ts';
 import { createSaveStore } from './persistence.ts';
 import { scoreText } from './score-view.ts';
+import { handExample, renderCatalog, renderDeck } from './reference.ts';
+import { runReview } from './run-review.ts';
 import { THRESHOLDS, thresholdValue, nextGap } from './core/thresholds.ts';
 import { drawOffer, offerLine, nextRerolls, OFFER_SIZE } from './core/draft.ts';
 import { LENGTHS, DEFAULT_NIGHTS, clampNights, lengthOf } from './core/lengths.ts';
@@ -1205,6 +1207,10 @@ function claimGuide(): boolean {
 
 /** 把该说的话投到气泡上：一门课优先，其次才是路过提醒 */
 function refreshTutorial(): void {
+  if (need('#codex').classList.contains('open')) {
+    if (coach) { coach.classList.add('hidden'); delete coach.dataset.step; delete coach.dataset.kind; }
+    return;
+  }
   if (claimGuide()) saveNow();
   const f = guideFactsNow();
   const l = currentLesson(f);
@@ -1239,6 +1245,14 @@ function renderAll(): void {
   refreshTutorial();
   // 待决事件也是牌桌状态的一部分：它挂在 state 上，投影就该在这里跟着一变
   renderEventPick();
+  if (need('#codex').classList.contains('open')) {
+    if (codexTab === 'deck') {
+      const filters = ['deckZone', 'deckSuit', 'deckSort'].map((id) => [id, need<HTMLSelectElement>(`#${id}`).value]);
+      renderCodex();
+      for (const [id, value] of filters) need<HTMLSelectElement>(`#${id}`).value = value;
+      need('#deckZone').dispatchEvent(new Event('change'));
+    } else if (codexTab === 'hands') renderCodex();
+  }
 }
 
 // ── 交互 ─────────────────────────────────────────────────────
@@ -1876,9 +1890,24 @@ function dismissCurtain(): boolean {
 }
 
 // ── 牌型图鉴 ─────────────────────────────────────────────────
+let codexTab = 'hands';
 function renderCodex(): void {
   const body = need('#codexBody');
   body.textContent = '';
+  const tabs = el('div', 'reference-tabs');
+  for (const [id, name] of [['hands', '牌型'], ['patrons', '客人'], ['letters', '引荐信'], ['books', '牌谱'], ['vouchers', '特权'], ['deck', '本局牌组']]) {
+    const btn = el('button', `pick${codexTab === id ? ' on' : ''}`);
+    btn.textContent = name; btn.dataset.tab = id;
+    btn.setAttribute('aria-pressed', String(codexTab === id));
+    btn.addEventListener('click', () => { codexTab = id; renderCodex(); need<HTMLButtonElement>(`[data-tab="${id}"]`, body).focus(); });
+    tabs.append(btn);
+  }
+  body.append(tabs);
+  if (codexTab === 'deck') { renderDeck(body, g.state); return; }
+  if (codexTab !== 'hands') { renderCatalog(body, codexTab, g.state); return; }
+  const note = el('p', 'reference-note');
+  note.textContent = '深色边框的示例牌参与牌型计分；浅色为陪牌。下面是基础流水与倍注，客人与强化会继续改变结果。';
+  body.append(note);
   const order: HandKind[] = ['high', 'pair', 'twopair', 'three', 'straight', 'flush',
     'full', 'four', 'sf', 'royal', 'five', 'flushhouse', 'flushfive'];
   // 隐秘与否按 SECRET_HANDS 判，不能按数组下标切——皇家同花顺不是隐秘牌型
@@ -1901,6 +1930,7 @@ function renderCodex(): void {
       ? (HANDS[k].book + ' 升一级：+' + HANDS[k].dMult + ' 倍注 / +' + HANDS[k].dChips + ' 流水')
       : '用「誊抄」造出重复的牌，凑出来一次就记在本局图鉴';
     d.append(cn, cv, cx, ct, cl);
+    if (seen) d.append(handExample(k));
     return d;
   };
   const h1 = el('div', 'codex-h');
@@ -1924,11 +1954,14 @@ function openPanel(which: Panel): void {
   else if (which === 'codex') renderCodex();
   else renderSettings();
   need(`#${which}`).classList.add('open');
+  if (which === 'codex' && coach) { coach.classList.add('hidden'); delete coach.dataset.step; delete coach.dataset.kind; }
   // 铺子里那两个锚点（请客/抬注）只有面板开着才量得到；等一帧让布局落定再重贴
   setTimeout(() => refreshTutorial(), 0);
 }
 function closePanels(): void {
+  const wasCodex = need('#codex').classList.contains('open');
   for (const p of ['shop', 'ledger', 'codex', 'settings'] as Panel[]) need(`#${p}`).classList.remove('open');
+  if (wasCodex) refreshTutorial();
 }
 window.addEventListener('resize', () => refreshTutorial());
 
@@ -2324,10 +2357,11 @@ function showEnd(won: boolean): void {
     : `第 ${g.state.night} 夜 · ${STAGE_LABEL[STAGE_KIND[g.state.stage]]}未达彩头，宾客散去。`;
   const sum = need('#endSummary');
   sum.textContent = '';
-  const best = g.state.ledger.length ? Math.max(...g.state.ledger.map((r) => r.best)) : g.state.score;
+  const review = runReview(g.state, won);
+  const best = review.best;
   for (const [k, v] of [
     ['撑过的场次', String(g.state.ledger.length)],
-    ['最高一夜流水', num(best)],
+    ['最高单场流水', num(best)],
     ['留下银钱', `£${g.state.money}`],
     ['声望', String(g.state.rep)],
     ['座上宾', String(g.state.seats.length)],
@@ -2339,6 +2373,21 @@ function showEnd(won: boolean): void {
     b.textContent = v;
     d.append(l, b);
     sum.append(d);
+  }
+  const reviewBox = need('#endReview');
+  reviewBox.textContent = '';
+  const result = el('p', 'review-result');
+  result.textContent = `本场彩头 ${num(review.target)} · 累计流水 ${num(review.score)} · ${won ? `超过 ${num(Math.max(0, review.score - review.target))}` : `还差 ${num(review.gap)}`}`;
+  const resources = el('p'); resources.textContent = review.resources;
+  const context = el('p'); context.textContent = review.context;
+  const tips = el('ul');
+  for (const text of review.tips) { const li = el('li'); li.textContent = text; tips.append(li); }
+  reviewBox.append(result, resources, context, tips);
+  if (lastChain) {
+    const detail = el('details', 'hand-detail');
+    const label = el('summary'); label.textContent = '最后一手怎么计分';
+    const trace = el('pre', 'score-trace'); trace.textContent = scoreText(lastChain, cardNameOf);
+    detail.append(label, trace); reviewBox.append(detail);
   }
   need('#btnEndless').hidden = !won;
   // 「事件回顾」：整局递过的事件按夜列一遍，右边那行是当时**实际**发生了什么
@@ -2785,7 +2834,8 @@ need('#btnReroll').addEventListener('click', () => {
 });
 need('#btnShop').addEventListener('click', () => { if (g.state.status === 'shop') openPanel('shop'); });
 need('#btnLedger').addEventListener('click', () => openPanel('ledger'));
-need('#btnCodex').addEventListener('click', () => openPanel('codex'));
+need('#btnCodex').addEventListener('click', () => { codexTab = 'hands'; openPanel('codex'); });
+need('#btnDeck').addEventListener('click', () => { codexTab = 'deck'; openPanel('codex'); });
 need('#btnSettings').addEventListener('click', () => openPanel('settings'));
 need('#btnResume').addEventListener('click', () => {
   const t = STORE.get();
@@ -2851,9 +2901,11 @@ document.addEventListener('keydown', (ev: KeyboardEvent) => {
   // 正在往输入框里打字时，空格和字母属于内容，不属于快捷键
   const tag = (ev.target as HTMLElement | null)?.tagName ?? '';
   if (tag === 'INPUT' || tag === 'TEXTAREA') {
-    if (ev.key === 'Enter') { ev.preventDefault(); need<HTMLButtonElement>('#btnStart').click(); }
+    if (ev.key === 'Enter' && (ev.target as HTMLElement).id === 'seedInput' && !need('#title').classList.contains('hidden')) { ev.preventDefault(); need<HTMLButtonElement>('#btnStart').click(); }
     return;
   }
+  if (tag === 'SELECT') return;
+  if ((tag === 'BUTTON' || tag === 'SUMMARY') && (ev.key === 'Enter' || ev.key === ' ')) return;
   const k = ev.key.toLowerCase();
   if (k === ' ' || k === 'enter') {
     ev.preventDefault();
@@ -3043,6 +3095,7 @@ const api = {
   },
   // 界面验收要能直接开侧页，不必模拟一串键盘事件
   renderShop,
+  showEnd,
   openPanel: (which: string): void => openPanel(which as never),
   closePanels,
   select(n: number | string): void {

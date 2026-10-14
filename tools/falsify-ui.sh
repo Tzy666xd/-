@@ -27,6 +27,17 @@ trap 'restore; rm -rf "$BAK"' EXIT
 
 # ||| 分隔：文件 原样 改成 说明
 INJ=(
+  "web/reference.ts|||      const seen = !SECRET_HANDS.includes(b.kind) || state.discovered.includes(b.kind);|||      const seen = true;|||查阅与复盘：未发现隐秘牌谱绕过隐藏规则"
+  "web/main.ts|||    const trace = el('pre', 'score-trace'); trace.textContent = scoreText(lastChain, cardNameOf);|||    const trace = el('pre', 'score-trace'); trace.textContent = '';|||查阅与复盘：终局缺少最后一手真实计分记录"
+  "web/reference.ts|||  const all = ZONES.flatMap(([key, name]) => state[key].map((card) => ({ card, zone: key, name })));|||  const all = ZONES.slice(0, 2).flatMap(([key, name]) => state[key].map((card) => ({ card, zone: key, name })));|||查阅与复盘：完整牌组漏掉桌面与弃牌"
+  "web/reference.ts|||zone.value === 'all' || r.zone === zone.value|||true|||查阅与复盘：位置筛选失效"
+  "web/reference.ts|||suit.value === 'all' || r.card.suit === suit.value|||true|||查阅与复盘：花色筛选失效"
+  "web/reference.ts|||b.card.rank - a.card.rank|||a.card.rank - b.card.rank|||查阅与复盘：点数排序方向错误"
+  "web/reference.ts|||  const cards = exampleCards(kind), scoring = evaluate(cards).scoring;|||  const cards = exampleCards(kind), scoring = cards;|||查阅与复盘：陪牌被标为参与计分"
+  "web/main.ts|||    if (seen) d.append(handExample(k));|||    d.append(handExample(k));|||查阅与复盘：未发现的隐秘示例提前泄露"
+  "web/run-review.ts|||  const best = Math.max(s.score, 0, ...s.ledger.map((r) => r.best));|||  const best = Math.max(0, ...s.ledger.map((r) => r.best));|||查阅与复盘：最高流水遗漏失败当前场"
+  "web/run-review.ts|||  const gap = Math.max(0, target - score);|||  const gap = 0;|||查阅与复盘：失败差额被清零"
+  "web/styles.css|||#title .deed, #guideIntro .deed { display: flex; flex-direction: column; overflow: hidden; padding: 0; }|||#title .deed, #guideIntro .deed { display: block; overflow: auto; padding: 0; }|||查阅与复盘：展开开局选项挤走入席按钮"
   "web/main.ts|||  saveNow();            // 内核已入账，动画中退出也应恢复到这一步|||  void 0;|||可靠性：普通出牌不立即存档"
   "web/main.ts|||  const got = discard(g);\n  saveNow();|||  const got = discard(g);|||可靠性：弃牌不立即存档"
   "web/main.ts|||    renderAll();\n    saveNow();\n    return;|||    renderAll();\n    return;|||可靠性：使用牌谱不立即存档"
@@ -188,6 +199,7 @@ fi
 # 先跑最直接的具名判据。没抓到时必定回退全套，避免分类错误变成漏测。
 focus_modes() {
   case "$1" in
+    *查阅与复盘*) echo '查阅与复盘';;
     *可靠性*) echo '可靠性';;
     *快捷键*|*输入框*) echo '焦点/快捷键';;
     *抽牌*|*扇面*|*扣过来*|*翻面*|*抽来*) echo '抽牌礼';;
@@ -250,13 +262,16 @@ PY
   if [[ $code -eq 0 ]]; then
     echo "  BLIND $why —— 界面门禁全绿"
     blind=$((blind + 1))
-  elif ! printf '%s' "$out" | grep -q 'UITEST FAIL'; then
+  elif [[ "$out" != *"UITEST FAIL"* ]]; then
     # 构建失败、脚本自身错误或启动失败，都不是界面判据抓到了注入。
     echo "  NOISE $why —— 没有界面失败裁决，拒绝记成 caught"
     printf '%s\n' "$out" | tail -5 | sed 's/^/        /'
     blind=$((blind + 1))
   else
-    echo "  caught  $why → $(printf '%s' "$out" | grep -m1 -A1 'FAIL ' | tr '\n' ' ' | cut -c1-120)"
+    # 不用 grep -q/-m 提前关管道：大段错误日志会让 printf 收到 SIGPIPE，pipefail 将真失败误报 NOISE。
+    firstFailure="${out#*UITEST FAIL}"
+    firstFailure="${firstFailure%%$'\n'*}"
+    echo "  caught  $why → UITEST FAIL${firstFailure:0:120}"
   fi
   restore
 done

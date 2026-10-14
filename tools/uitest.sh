@@ -68,6 +68,7 @@ stopped=0
 # 只有"花了多少毫秒"这一类在代打下会被显式记成「未评」而不是假装通过。
 run() {
   local label="$1" boot="$2" query="$3" extra="${4:-}"
+  if [[ "$STOP_FAIL" == "1" ]]; then query="$query&failfast=1"; fi
   local out
   if ! mode_wanted "$label"; then return 0; fi
   ran=$((ran + 1))
@@ -137,6 +138,7 @@ else
 fi
 
 echo "界面行为："
+run '查阅与复盘' "$BOOT_EMPTY" 'uitest=reference&snap=1'
 run '可靠性回归' "$BOOT_EMPTY" 'uitest=reliable&snap=1'
 run '焦点/快捷键' "$BOOT_SAVE" 'uitest=keys'
 run '设置与偏好' "$BOOT_EMPTY" 'uitest=prefs'

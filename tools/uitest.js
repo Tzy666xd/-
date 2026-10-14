@@ -9,10 +9,15 @@
   if (!H) return 'UITEST FAIL（页面没挂上 __H 测试口）';
   var q = function (s) { return document.querySelector(s); };
   var results = [];
+  var failFast = new URLSearchParams(location.search).get('failfast') === '1';
   // 因环境而无法评估、**又没有编造判据**的条目。必须显式报出来，
   // 否则"PASS 29/29"会读成"全验过了"，而那正是假绿。
   var unevaluated = [];
-  function must(name, ok) { results.push([!!ok, name]); }
+  function must(name, ok) {
+    results.push([!!ok, name]);
+    // 注入只要一条真实判据变红即可裁决；异步流程不用再等后续动画与课程超时。
+    if (!ok && failFast) window.__UITEST_RESULT = verdict('错误注入首次失败');
+  }
   function click(sel) { var n = q(sel); if (!n) { must(sel + ' 存在', false); return false; } n.click(); return true; }
   function key(el, k) {
     el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
@@ -161,7 +166,100 @@
 
   var mode = new URLSearchParams(location.search).get('uitest') || 'again';
 
-  if (mode === 'reliable') {
+  if (mode === 'reference') {
+    q('#title').classList.remove('hidden');
+    must('开局自定选项默认收起', !q('#startOptions').open);
+    must('玩法与入席位于折叠区外', !q('#startOptions').contains(q('#modes')) && !q('#startOptions').contains(q('#btnStart')));
+    H.setPrefFlag('draft', true);
+    q('#startOptions').open = true;
+    var startScroll = q('.start-scroll');
+    startScroll.scrollTop = 0;
+    var startRect = q('#btnStart').getBoundingClientRect(), deedRect = q('#title .deed').getBoundingClientRect();
+    must('展开选项与五位客人时入席仍在窗口内', startRect.top >= deedRect.top && startRect.bottom <= innerHeight && startRect.bottom <= deedRect.bottom);
+    must('开始按钮没有被滚动内容挤走', startScroll.getBoundingClientRect().bottom <= startRect.top);
+    startScroll.scrollTop = startScroll.scrollHeight;
+    must('滚动选项时入席位置固定', q('#btnStart').getBoundingClientRect().top === startRect.top);
+    q('#guideIntro').classList.remove('hidden');
+    var guideRect = q('#btnTakeGuide').getBoundingClientRect();
+    must('初次课表的选择按钮始终可见', guideRect.top > 0 && guideRect.bottom <= innerHeight);
+    click('#btnSkipGuide');
+    H.start(4242);
+    var state = H.game.state;
+    state.discovered = [];
+    click('#btnCodex');
+    must('读图鉴时教学提示不遮住内容', !H.tutor().visible && !H.guide().visible);
+    must('图鉴可查询六类内容', document.querySelectorAll('.reference-tabs button').length === 6);
+    must('常用十种牌型有真实示例', document.querySelectorAll('.hand-example').length === 10);
+    must('高牌示例只有一张参与计分', document.querySelectorAll('[data-kind="high"] .counts').length === 1);
+    must('对子示例只有两张参与计分', document.querySelectorAll('[data-kind="pair"] .counts').length === 2);
+    must('皇家同花顺展示五张', document.querySelectorAll('[data-kind="royal"] .counts').length === 5);
+    must('隐秘未发现牌型不显示示例', document.querySelectorAll('.codex-row.locked .hand-example').length === 0);
+    state.discovered = ['five', 'flushhouse', 'flushfive'];
+    click('#btnCodex');
+    must('本局发现后显出三种隐秘示例', document.querySelectorAll('.hand-example').length === 13);
+    click('[data-tab="patrons"]');
+    must('客人目录完整', document.querySelectorAll('.catalog-entry').length === 32);
+    var search = q('#catalogSearch'); search.value = '霍布斯'; search.dispatchEvent(new Event('input'));
+    must('名称搜索过滤客人', document.querySelectorAll('.catalog-entry').length === 1 && q('.catalog-entry h3').textContent === '管家霍布斯');
+    var seedBefore = state.seed, handBefore = state.handsLeft;
+    key(search, 'Enter'); key(search, ' ');
+    must('目录搜索回车空格不重开或出牌', H.game.state === state && state.seed === seedBefore && state.handsLeft === handBefore);
+    search.value = '不存在的客人'; search.dispatchEvent(new Event('input'));
+    must('搜索无匹配有空状态', !q('.catalog-entry') && q('.catalog-list').textContent.indexOf('没有匹配') >= 0);
+    click('[data-tab="letters"]');
+    must('引荐信目录十二项', document.querySelectorAll('.catalog-entry').length === 12);
+    click('[data-tab="books"]');
+    must('牌谱目录十二项', document.querySelectorAll('.catalog-entry').length === 12);
+    must('已发现隐秘牌谱可查阅', q('.catalog-list').textContent.indexOf('同花五条') >= 0);
+    state.discovered = []; click('[data-tab="books"]');
+    must('未发现隐秘牌谱不绕过牌型隐藏规则', q('.catalog-list').textContent.indexOf('未见的牌谱') >= 0 && q('.catalog-list').textContent.indexOf('同花五条') < 0);
+    click('[data-tab="vouchers"]');
+    must('会员特权目录八项', document.querySelectorAll('.catalog-entry').length === 8);
+    // 特制实际牌区：复制牌、强化、桌面和弃牌均要展示；任何查阅都不得挪牌或走随机流。
+    state.table.push(state.deck.pop()); state.discardPile.push(state.deck.pop());
+    var copy = Object.assign({}, state.hand[0], {id: 9999, enh: 'glass', seal: 'red'});
+    state.deck.push(copy);
+    var beforeView = JSON.stringify(state), beforeCalls = H.game.rand.calls;
+    click('#btnDeck');
+    must('牌组入口直接显示完整实际牌组', q('#codex').classList.contains('open') && document.querySelectorAll('.deck-card').length === 53);
+    must('牌区总数来自当前状态', q('.deck-total').textContent.indexOf('待抽 ' + state.deck.length) >= 0 && q('.deck-total').textContent.indexOf('桌面 1') >= 0 && q('.deck-total').textContent.indexOf('弃牌 1') >= 0);
+    must('复制牌的两层强化可见', q('[data-card-id="9999"]').textContent.indexOf('玻璃') >= 0 && q('[data-card-id="9999"]').textContent.indexOf('重诵') >= 0);
+    q('#deckZone').value = 'hand'; q('#deckZone').dispatchEvent(new Event('change'));
+    must('牌区筛选只看真实手牌', document.querySelectorAll('.deck-card').length === state.hand.length && Array.from(document.querySelectorAll('.deck-card')).every(function(c){return c.dataset.zone === 'hand';}));
+    q('#deckSuit').value = 'h'; q('#deckSuit').dispatchEvent(new Event('change'));
+    must('花色与区域筛选相交', document.querySelectorAll('.deck-card').length === state.hand.filter(function(c){return c.suit === 'h';}).length);
+    key(q('#deckZone'), 'Enter'); key(q('#deckSort'), ' ');
+    must('筛选键盘操作不改变牌局', JSON.stringify(state) === beforeView && H.game.rand.calls === beforeCalls);
+    q('#deckZone').value = 'all'; q('#deckSuit').value = 'all'; q('#deckZone').dispatchEvent(new Event('change'));
+    var ranks = Array.from(document.querySelectorAll('.deck-card')).map(function(c){return Number(c.dataset.rank);});
+    must('点数排序由高到低', ranks.every(function(r,i){return i === 0 || ranks[i-1] >= r;}));
+    q('#deckSort').value = 'suit'; q('#deckSort').dispatchEvent(new Event('change'));
+    var suitOrder = Array.from(document.querySelectorAll('.deck-card')).map(function(c){return 'shdc'.indexOf(c.dataset.suit);});
+    must('花色排序分组稳定', suitOrder.every(function(r,i){return i === 0 || suitOrder[i-1] <= r;}));
+    must('全部筛选和排序不修改状态或抽牌顺序', JSON.stringify(state) === beforeView && H.game.rand.calls === beforeCalls);
+    state.deck.pop(); H.render();
+    must('牌组打开时随局面刷新且保留排序', document.querySelectorAll('.deck-card').length === 52 && q('#deckSort').value === 'suit');
+    H.closePanels();
+    click('#tray .card'); click('#btnPlay');
+    state.score = 270; state.handsLeft = 0; state.discardsLeft = 2; state.handIndex = 4;
+    state.status = 'lost'; state.consumables = [{t:'letter', id:'lens'}];
+    state.ledger = [{night:1,stage:'small',label:'便宴',target:100,best:150,reward:1,profit:0,money:10,raised:0,rep:0}];
+    H.showEnd(false);
+    must('散场最高流水包含失败的当前场', q('#endSummary').textContent.indexOf('最高单场流水270') >= 0);
+    must('散场正确解释目标与差額', q('.review-result').textContent.indexOf('彩头 300') >= 0 && q('.review-result').textContent.indexOf('还差 30') >= 0);
+    must('散场建议引用未用资源', q('#endReview').textContent.indexOf('2 次弃牌') >= 0 && q('#endReview').textContent.indexOf('磨镜') >= 0);
+    must('最后一手复盘来自真实计分事件', q('#endReview .score-trace') && q('#endReview .score-trace').textContent.indexOf('本手入账') >= 0);
+    state.ledger[0].target = 100; state.ledger[0].best = 350; state.score = 0;
+    H.showEnd(true);
+    must('获胜复盘读取终场账本', q('.review-result').textContent.indexOf('彩头 100') >= 0 && q('.review-result').textContent.indexOf('超过 250') >= 0);
+    // 聚焦结业提示的真实可见性，避免坏锚点让长教学流程先超时，拿不到具体裁决。
+    H.startGuide(); H.seat('hobbs');
+    H.game.state.guide = ['on'].concat(H.guide().lessons.filter(function(id){return id !== 'done';}));
+    var finalRow = {night:1,stage:'small',label:'便宴',target:100,best:150,reward:1,profit:0,money:10,raised:0,rep:0};
+    H.game.state.ledger = [finalRow, Object.assign({}, finalRow)];
+    H.game.state.status = 'playing'; H.render();
+    must('结业课有真实锚点并能完整显示', H.guide().id === 'done' && H.guide().visible && H.guide().inViewport);
+  } else if (mode === 'reliable') {
     H.start(4242);
     click('#tray .card');
     click('#btnPlay');
@@ -240,6 +338,7 @@
     must('续局说明写了第几夜', /第 \d+ 夜/.test(q('#resumeNote').textContent || ''));
     var seedBox = q('#seedInput');
     var wasMuted = H.muted;
+    click('#startOptions summary');
     seedBox.focus();
     must('焦点确实在种子里', document.activeElement === seedBox);
     key(seedBox, 'm');
