@@ -116,6 +116,7 @@
     <p class="sub">一间维多利亚时代的私人牌局 · 你替它做庄</p>
     <div class="pickrow"><span class="lbl2">玩法</span><div class="pickers" id="modes"></div></div>
     <p class="picknote" id="pickNote"></p>
+    <button class="journey-switch" id="btnEventsToggle" aria-pressed="false">夜间奇遇 · 遇见稀奇牌</button>
     <details class="rules-fold" id="startOptions">
     <summary>自定牌局 · 难度、轮数、牌组与种子</summary>
     <div class="seedrow" id="seedRow">
@@ -148,6 +149,7 @@
     <div class="row-btns">
       <button class="brass-btn big" id="btnStart">入 席</button>
       <button class="brass-btn big" id="btnResume" hidden>继续上一局</button>
+      <button class="brass-btn" id="btnLastReport" hidden>上一局战报</button>
     </div>
     <div class="resume-note" id="resumeNote" hidden></div>
     <div class="keys">ⓘ 命名仍是占位，等你定。</div>
@@ -203,7 +205,24 @@
     </div>
     <div class="row-btns">
       <button class="brass-btn" id="btnEndless" hidden>继续经营</button>
+      <button class="brass-btn" id="btnShareRun">分享对局</button>
       <button class="brass-btn big" id="btnAgain">再开一局</button>
+    </div>
+  </div>
+</div>
+
+<div id="sharecard" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+  <div class="share-deed">
+    <div class="share-preview" id="sharePreview"></div>
+    <div class="share-controls">
+      <p class="share-kicker">TABLE STORIES</p>
+      <h2 id="shareTitle">把这一局<br>留成一张牌</h2>
+      <p>成绩、构筑与关键选择，都在这张战报里。保存图片发给朋友，或者分享同一种子，再来一局。</p>
+      <button class="brass-btn big" id="btnExportReport">保存 PNG 图片</button>
+      <button class="brass-btn" id="btnSystemShare">系统分享</button>
+      <button class="brass-btn" id="btnCopyReport">复制分享文案</button>
+      <p id="shareStatus" class="share-status" role="status" aria-live="polite"></p>
+      <button class="share-close" id="btnCloseShare">返回牌局</button>
     </div>
   </div>
 </div>

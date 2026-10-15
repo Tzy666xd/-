@@ -7,8 +7,8 @@ cd "$(dirname "$0")"
 APP_NAME="几尼"
 BUNDLE_ID="local.guinea.app"
 EXE="Guinea"
-VERSION="${VERSION:-1.0.2}"
-BUILD_NUMBER="${BUILD_NUMBER:-3}"
+VERSION="${VERSION:-1.1.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-4}"
 CHANNEL="${CHANNEL:-local}"
 if [[ "${RELEASE:-0}" == "1" && "$CHANNEL" == "local" ]]; then CHANNEL="developer-id"; fi
 case "$CHANNEL" in local|developer-id|app-store) ;; *) echo "未知 CHANNEL=$CHANNEL"; exit 2;; esac

@@ -138,6 +138,14 @@ else
 fi
 
 echo "界面行为："
+EXPORT_OUT="${EXPORT_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/guinea-export-test.XXXXXX")}"
+REPORT_FIXTURE=$(node -e '
+const {Game,play}=await import("./core/game.ts");const {makeReport}=await import("./core/run-summary.ts");
+const g=new Game(4242);g.state.chosen=[g.state.hand[0].id];play(g);g.state.status="lost";
+process.stdout.write(JSON.stringify(makeReport(g.state,false,"2026-10-15")));')
+run '战报重启回读' "localStorage.clear(); localStorage.setItem('$KEYS_PREFS','{\"guide\":true}'); localStorage.setItem('guinea.last-report.v1','$REPORT_FIXTURE');" 'uitest=shareboot'
+run '损坏战报' "localStorage.clear(); localStorage.setItem('$KEYS_PREFS','{\"guide\":true}'); localStorage.setItem('guinea.last-report.v1','{\"v\":1}');" 'uitest=sharebad'
+run '分享与稀奇牌' "$BOOT_EMPTY" 'uitest=share&snap=1' "--export-dir $EXPORT_OUT"
 run '查阅与复盘' "$BOOT_EMPTY" 'uitest=reference&snap=1'
 run '可靠性回归' "$BOOT_EMPTY" 'uitest=reliable&snap=1'
 run '焦点/快捷键' "$BOOT_SAVE" 'uitest=keys'

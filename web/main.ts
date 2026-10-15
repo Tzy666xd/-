@@ -32,6 +32,10 @@ import { createSaveStore } from './persistence.ts';
 import { scoreText } from './score-view.ts';
 import { handExample, renderCatalog, renderDeck } from './reference.ts';
 import { runReview } from './run-review.ts';
+import { makeReport } from './core/run-summary.ts';
+import type { RunReport } from './core/run-summary.ts';
+import { drawReport, nativeShare, loadReport, saveReport, clearReport } from './share-card.ts';
+import { SPECIALS, specialById } from './core/special-cards.ts';
 import { THRESHOLDS, thresholdValue, nextGap } from './core/thresholds.ts';
 import { drawOffer, offerLine, nextRerolls, OFFER_SIZE } from './core/draft.ts';
 import { LENGTHS, DEFAULT_NIGHTS, clampNights, lengthOf } from './core/lengths.ts';
@@ -618,13 +622,17 @@ function syncCard(c: Card, node: HTMLElement): void {
   node.tabIndex = g.state.hand.some((x) => x.id === c.id) ? 0 : -1;
   node.setAttribute('aria-label', `${RANK_LABEL(c.rank)}${SUIT_GLYPH[c.suit]}${c.enh !== 'none' ? `，${materialById(c.enh).name}` : ''}${c.seal !== 'none' ? `，${SEAL_NAME[c.seal]}` : ''}`);
   node.setAttribute('aria-pressed', String(chosen || target));
+  const rare = specialById(c.special);
+  if (rare) { node.setAttribute('aria-label',`${node.getAttribute('aria-label')}，${rare.name}，${rare.blurb}`); node.title=rare.blurb; }
+  else node.removeAttribute('title');
   node.className = 'card'
     + (c.suit === 'h' || c.suit === 'd' ? ' red' : '')
     + (c.enh !== 'none' ? ` e-${c.enh}` : '')
     + (c.seal !== 'none' ? ` s-${c.seal}` : '')
+    + (c.special ? ` rare-${c.special}` : '')
     + (chosen ? ' chosen' : '')
     + (target ? ' target' : '');
-  const stamp = `${c.rank}${c.suit}${c.enh}${c.seal}`;
+  const stamp = `${c.rank}${c.suit}${c.enh}${c.seal}${c.special??''}`;
   if (node.dataset.built !== stamp) {
     node.dataset.built = stamp;
     node.textContent = '';
@@ -677,6 +685,9 @@ function syncCard(c: Card, node: HTMLElement): void {
       seal.textContent = '❖';
       seal.title = SEAL_NAME[c.seal];
       node.append(seal);
+    }
+    if (rare) {
+      const badge=el('span','rare-badge');badge.textContent=`${rare.glyph} ${rare.name}`;badge.style.setProperty('--rare-color',rare.color);node.append(badge);
     }
   }
 }
@@ -1895,7 +1906,7 @@ function renderCodex(): void {
   const body = need('#codexBody');
   body.textContent = '';
   const tabs = el('div', 'reference-tabs');
-  for (const [id, name] of [['hands', '牌型'], ['patrons', '客人'], ['letters', '引荐信'], ['books', '牌谱'], ['vouchers', '特权'], ['deck', '本局牌组']]) {
+  for (const [id, name] of [['hands', '牌型'], ['patrons', '客人'], ['letters', '引荐信'], ['books', '牌谱'], ['vouchers', '特权'], ['rare', '稀奇牌'], ['deck', '本局牌组']]) {
     const btn = el('button', `pick${codexTab === id ? ' on' : ''}`);
     btn.textContent = name; btn.dataset.tab = id;
     btn.setAttribute('aria-pressed', String(codexTab === id));
@@ -1903,6 +1914,10 @@ function renderCodex(): void {
     tabs.append(btn);
   }
   body.append(tabs);
+  if (codexTab==='rare') {
+    const intro=el('p','reference-note');intro.textContent='在开局页启用「夜间奇遇」，有机会选择稀奇牌事件。牌性可与强化、蜡封同时存在，只在本张参与计分时触发。';body.append(intro);
+    for (const card of SPECIALS) {const entry=el('article','catalog-entry rare-entry');const h=el('h3');h.textContent=`${card.glyph} ${card.name}`;const p=el('p');p.textContent=card.blurb;entry.append(h,p);body.append(entry);}return;
+  }
   if (codexTab === 'deck') { renderDeck(body, g.state); return; }
   if (codexTab !== 'hands') { renderCatalog(body, codexTab, g.state); return; }
   const note = el('p', 'reference-note');
@@ -2248,7 +2263,7 @@ function renderSettings(): void {
   const dl = el('div', 'sl');
   dl.textContent = '清空进度';
   const dd = el('span', 'sd');
-  dd.textContent = '删掉本机存档，回到标题页。不可撤销。';
+  dd.textContent = '删掉本机存档与上一局战报，回到标题页。不可撤销。';
   dl.append(dd);
   const btn = el('button', 'brass-btn ghost danger');
   btn.textContent = '清空';
@@ -2261,6 +2276,7 @@ function renderSettings(): void {
       return;
     }
     STORE.del();
+    clearReport();lastReport=null;need<HTMLButtonElement>('#btnLastReport').hidden=true;
     refreshResume();
     closePanels();
     need('#title').classList.remove('hidden');
@@ -2350,7 +2366,38 @@ function renderLedger(): void {
 }
 
 // ── 幕卡 ─────────────────────────────────────────────────────
+let lastReport:RunReport|null=null;
+let reportCanvas:HTMLCanvasElement|null=null;
+let exportRequest=0;
+let shareReturn:HTMLElement|null=null;
+function showShare(report:RunReport):void {
+  shareReturn=document.activeElement as HTMLElement;
+  lastReport=report;reportCanvas=drawReport(report);
+  need('#sharePreview').replaceChildren(reportCanvas);reportCanvas.setAttribute('aria-label','本局战报图片预览');
+  need('#shareStatus').textContent='PNG · 1200 × 1740 · 图片与文案均在本机生成';
+  need('#sharecard').classList.remove('hidden');need<HTMLButtonElement>('#btnExportReport').focus();
+}
+function closeShare():void {
+  need('#sharecard').classList.add('hidden');exportRequest=0;
+  for(const id of ['btnExportReport','btnSystemShare','btnCopyReport'])need<HTMLButtonElement>('#'+id).disabled=false;
+  shareReturn?.focus();
+}
+function performShare(action:'export'|'share'|'copy'):void {
+  if(!lastReport||!reportCanvas||exportRequest)return;
+  try {exportRequest=nativeShare(action,lastReport,reportCanvas);for(const id of ['btnExportReport','btnSystemShare','btnCopyReport'])need<HTMLButtonElement>('#'+id).disabled=true;need('#shareStatus').textContent=action==='export'?'选择保存位置…':action==='share'?'选择分享方式…':'正在复制…';}
+  catch(error){need('#shareStatus').textContent=(error as Error).message;}
+}
+window.addEventListener('guinea-export',(event)=>{
+  const reply=(event as CustomEvent).detail;
+  if(!reply||reply.id!==exportRequest)return;
+  exportRequest=0;
+  for(const id of ['btnExportReport','btnSystemShare','btnCopyReport'])need<HTMLButtonElement>('#'+id).disabled=false;
+  need('#shareStatus').textContent=reply.status==='saved'?'图片已保存，可发给朋友。':reply.status==='copied'?'分享文案已复制。':reply.status==='presented'?'已打开系统分享菜单。':reply.status==='cancelled'?'已取消保存。':reply.detail||'导出失败，请重试。';
+});
 function showEnd(won: boolean): void {
+  lastReport=makeReport(g.state,won,new Date().toLocaleDateString('sv-SE'));
+  saveReport(lastReport);
+  need<HTMLButtonElement>('#btnLastReport').hidden=false;
   need('#endTitle').textContent = won ? '堂 局' : '散 场';
   need('#endSub').textContent = won
     ? `${g.state.nights} 夜通吃。这间牌局从此有了你的名字。`
@@ -2466,6 +2513,8 @@ function pickNote(): void {
 }
 
 function renderPickers(): void {
+  const events=need<HTMLButtonElement>('#btnEventsToggle');events.disabled=dailyLocked();events.setAttribute('aria-pressed',String(!dailyLocked()&&prefs.flags.events));
+  events.textContent=dailyLocked()?'每日牌局使用固定规则':prefs.flags.events?'夜间奇遇已开启 · 事件中可遇见稀奇牌':'开启夜间奇遇 · 事件中可遇见稀奇牌';
   // 牌组那一排随局长变：别的档的专属牌组不许摆在这里——内核会把它落回标准局，
   // 屏幕上留一个"点得动、进不去"的选项比不锁更糟（与签名宾同一口径）
   const offer = decksFor(nightsForRun());
@@ -2596,6 +2645,12 @@ function renderDraft(): void {
 /** 七个角标各配一只画出来的小记号，全部 currentColor + stroke，跟着画法换色。
  *  取 eventTags 的第一条——tags 是从 ops 推出来的，所以同一件事永远配同一个记号。 */
 const EVENT_GLYPH: Record<string, string> = {
+  crest: '<path d="M6 20h12l-1-9H7L6 20Z"/><path d="M6 5v6h12V5h-3v3h-3V5H9v3H6"/>',
+  ledger: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  ember: '<path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/>',
+  mirror: '<path d="m12 3 8 9-8 9-8-9 8-9Z"/><path d="m12 7 4 5-4 5M8 12h3"/>',
+  anchor: '<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10h8M4 14c0 4 3 7 8 7s8-3 8-7M4 14l-2 3M20 14l2 3"/>',
+  comet: '<circle cx="8" cy="16" r="4"/><path d="M10 11 19 2M14 12l8-8M14 16l7-7"/>',
   银钱: '<path d="M7 9h10l1.6 8.4A3 3 0 0 1 15.7 21H8.3a3 3 0 0 1-2.9-3.6L7 9Z"/><path d="M9.4 9V7.2a2.6 2.6 0 0 1 5.2 0V9"/>',
   规矩: '<path d="M12 4v14"/><path d="M5 8h14"/><path d="M5 8 2.8 13a2.6 2.6 0 0 0 4.4 0L5 8Z"/><path d="M19 8l-2.2 5a2.6 2.6 0 0 0 4.4 0L19 8Z"/><path d="M8.6 20h6.8"/>',
   计分: '<path d="M4 18 9 9l3.4 5 2.2-3.2L20 18Z"/><circle cx="9" cy="9" r="1.4"/>',
@@ -2607,7 +2662,8 @@ const EVENT_GLYPH: Record<string, string> = {
 
 function eventGlyph(e: EventDef): string {
   const tags = eventTags(e);
-  const key = tags.length ? tags[0] : '运气';
+  const rare=e.ops.flatMap(op=>op.t==='addCard'?op.cards:[]).map(card=>specialById(card.special)).find(Boolean);
+  const key = rare ? rare.id : tags.length ? tags[0] : '运气';
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.15" '
     + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
     + (EVENT_GLYPH[key] ?? EVENT_GLYPH['运气']) + '</svg>';
@@ -2632,6 +2688,11 @@ function renderEventPick(): void {
     need('.ev-risk', c).textContent = riskName(e.risk);
     need('.ev-kicker', c).textContent = e.kicker;
     need('.ev-blurb', c).textContent = e.blurb;
+    for(const op of e.ops) if(op.t==='addCard') for(const card of op.cards) {
+      const rare=specialById(card.special);if(!rare)continue;
+      const gift=el('span','ev-gift');gift.textContent=`${rare.name} · ${rare.blurb}`;c.append(gift);c.classList.add('has-gift');
+      need('.ev-glyph',c).style.color=rare.color;
+    }
     c.title = `${e.name}｜${riskName(e.risk)}｜${eventTags(e).join(' · ')}`;
     c.dataset.eid = e.id;
     c.addEventListener('click', () => takeEvent(e.id));
@@ -2765,6 +2826,7 @@ function start(seed: number, deckId = pickedDeck, over?: { diff?: Diff; mode?: M
   setBusy(false);
   need('#title').classList.add('hidden');
   need('#endcard').classList.add('hidden');
+  need('#sharecard').classList.add('hidden');exportRequest=0;reportCanvas=null;
   closePanels();
   closeFan();          // 换局时扇面还摊着的话，那一排扣过来的牌是上一局的
   renderAll();
@@ -2796,6 +2858,13 @@ function startGuide(): void {
 
 // ── 按钮与键盘 ───────────────────────────────────────────────
 need('#btnStart').addEventListener('click', () => start(runSeed()));
+need('#btnEventsToggle').addEventListener('click',()=>{if(dailyLocked())return;prefs.flags.events=!prefs.flags.events;applyPrefs();renderPickers();});
+need('#btnShareRun').addEventListener('click',()=>{if(lastReport)showShare(lastReport);});
+need('#btnLastReport').addEventListener('click',()=>{const report=lastReport??loadReport();if(report)showShare(report);else toast('还没有上一局战报');});
+need('#btnExportReport').addEventListener('click',()=>performShare('export'));
+need('#btnSystemShare').addEventListener('click',()=>performShare('share'));
+need('#btnCopyReport').addEventListener('click',()=>performShare('copy'));
+need('#btnCloseShare').addEventListener('click',closeShare);
 // 出牌与弃牌以前只有空格 / X 按得动：同一件事必须也点得动（走的是同一条 doPlay/doDiscard，
 // 不搞第二套逻辑，所以按钮与快捷键不可能各演各的）
 need('#btnPlay').addEventListener('click', () => { void doPlay(); });
@@ -2898,6 +2967,14 @@ need('#curtain').addEventListener('click', () => dismissCurtain());
 // 所以"按钮存在"与"幕布能点掉"是同一份实现，不会出现两条路各关各的。
 document.addEventListener('keydown', (ev: KeyboardEvent) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if(!need('#sharecard').classList.contains('hidden')) {
+    if(ev.key==='Escape'){ev.preventDefault();closeShare();}
+    if(ev.key==='Tab') {
+      const buttons=Array.from(need('#sharecard').querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const i=buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if(ev.shiftKey&&i<=0){ev.preventDefault();buttons.at(-1)!.focus();}else if(!ev.shiftKey&&(i<0||i===buttons.length-1)){ev.preventDefault();buttons[0].focus();}
+    }
+    return;
+  }
   // 正在往输入框里打字时，空格和字母属于内容，不属于快捷键
   const tag = (ev.target as HTMLElement | null)?.tagName ?? '';
   if (tag === 'INPUT' || tag === 'TEXTAREA') {
@@ -3172,6 +3249,7 @@ pickedDeck = prefs.deck;
 renderPickers();
 // 续局按钮在 HTML 里默认 hidden：不在开场就查一次存档，玩家永远看不见它
 refreshResume();
+need<HTMLButtonElement>('#btnLastReport').hidden=loadReport()===null;
 // 第一次玩的话，标题页前面先站一张课表卡（判据在 refreshIntro 里：没上过课 + 手上没存档）
 refreshIntro();
 // 偶尔一记壁炉噼啪，让房间是活的。抓帧与减少动效时不出声。只登记一次

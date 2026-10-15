@@ -27,6 +27,12 @@ trap 'restore; rm -rf "$BAK"' EXIT
 
 # ||| 分隔：文件 原样 改成 说明
 INJ=(
+  "web/main.ts|||need('#sharecard').classList.remove('hidden');need<HTMLButtonElement>('#btnExportReport').focus();|||need('#sharecard').classList.remove('hidden');|||分享新牌：打开分享不聚焦保存"
+  "web/main.ts|||  saveReport(lastReport);|||  void 0;|||分享新牌：上一局战报不持久化"
+  "web/share-card.ts|||canvas.width=1200;canvas.height=1740|||canvas.width=600;canvas.height=1740|||分享新牌：导出分辨率缩水"
+  "web/main.ts|||if(ev.key==='Escape'){ev.preventDefault();closeShare();}|||if(false){closeShare();}|||分享新牌：Escape关不掉弹窗"
+  "web/main.ts|||    if (rare) {|||    if (false) {|||分享新牌：稀奇牌角标消失"
+  "web/main.ts|||if(!need('#sharecard').classList.contains('hidden')) {|||if(false) {|||分享新牌：弹窗键盘漏到游戏"
   "web/reference.ts|||      const seen = !SECRET_HANDS.includes(b.kind) || state.discovered.includes(b.kind);|||      const seen = true;|||查阅与复盘：未发现隐秘牌谱绕过隐藏规则"
   "web/main.ts|||    const trace = el('pre', 'score-trace'); trace.textContent = scoreText(lastChain, cardNameOf);|||    const trace = el('pre', 'score-trace'); trace.textContent = '';|||查阅与复盘：终局缺少最后一手真实计分记录"
   "web/reference.ts|||  const all = ZONES.flatMap(([key, name]) => state[key].map((card) => ({ card, zone: key, name })));|||  const all = ZONES.slice(0, 2).flatMap(([key, name]) => state[key].map((card) => ({ card, zone: key, name })));|||查阅与复盘：完整牌组漏掉桌面与弃牌"
@@ -44,7 +50,7 @@ INJ=(
   "web/main.ts|||    if (seenSets !== null && names.some((n) => !seenSets.includes(n)))|||    if (names.some((n) => !seenSets.includes(n)))|||可靠性：已有套装首次进铺子报错"
   "web/main.ts|||  trace.textContent = scoreText(lastChain, cardNameOf);|||  trace.textContent = '计分记录';|||可靠性：玩家账本缺少实际计分事件"
   "web/main.ts|||  const actualSeed = mode === 'daily' ? dailySeed() : seed;|||  const actualSeed = seed;|||可靠性：菜单开每日局能指定任意种子"
-  "web/main.ts|||refreshResume();\n// 第一次玩的话|||void 0;\n// 第一次玩的话|||启动时不查存档：续局按钮永远不出现"
+  "web/main.ts|||refreshResume();\nneed<HTMLButtonElement>('#btnLastReport').hidden=loadReport()===null;\n// 第一次玩的话|||void 0;\nneed<HTMLButtonElement>('#btnLastReport').hidden=loadReport()===null;\n// 第一次玩的话|||启动时不查存档：续局按钮永远不出现"
   "web/main.ts|||  savePrefs();\n}|||  void 0;\n}|||设置改完不落盘：改完音量/画法重启就全丢"
   "web/main.ts|||  if (tag === 'INPUT' || tag === 'TEXTAREA') {|||  if (false) {|||快捷键在输入框里照样抢按键"
   "web/main.ts|||sfx.muted = prefs.muted || prefs.vol === 0;|||sfx.muted = prefs.vol === 0;|||改音量把手动静音冲掉"
@@ -199,6 +205,7 @@ fi
 # 先跑最直接的具名判据。没抓到时必定回退全套，避免分类错误变成漏测。
 focus_modes() {
   case "$1" in
+    *分享新牌*) echo '分享';;
     *查阅与复盘*) echo '查阅与复盘';;
     *可靠性*) echo '可靠性';;
     *快捷键*|*输入框*) echo '焦点/快捷键';;

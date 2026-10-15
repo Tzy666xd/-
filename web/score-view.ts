@@ -13,7 +13,7 @@ export function scoreText(res: ScoreResult | null, cardName: (id: number) => str
     switch (e.t) {
       case 'hand': rows.push(`${HANDS[e.kind].name}（${e.level} 级）起手 → ${tail}`); break;
       case 'blocked': rows.push(`${cardName(e.id)} 被${e.why}挡下 → ${tail}`); break;
-      case 'card': rows.push(`${cardName(e.id)}：+${e.addChips} 流水${e.addMult ? ` +${e.addMult} 倍注` : ''}${e.xmult !== 1 ? ` ×${e.xmult}` : ''} → ${tail}`); break;
+      case 'card': rows.push(`${cardName(e.id)}${e.note ? `「${e.note}」` : ''}：+${e.addChips} 流水${e.addMult ? ` +${e.addMult} 倍注` : ''}${e.xmult !== 1 ? ` ×${e.xmult}` : ''} → ${tail}`); break;
       case 'patron': rows.push(`${patronById(e.pid).name}${e.note ? `「${e.note}」` : ''}：+${e.addChips} 流水 +${e.addMult} 倍注 ×${e.xmult} → ${tail}`); break;
       case 'bonus': rows.push(`★ 阈值「${e.source}」：+${e.addChips} 流水 +${e.addMult} 倍注 ×${e.xmult} → ${tail}`); break;
       case 'shatter': rows.push(`${cardName(e.id)} 碎了 → ${tail}`); break;

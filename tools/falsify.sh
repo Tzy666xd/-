@@ -43,6 +43,19 @@ trap 'cleanup; rm -rf "$BAK"' EXIT
 
 # 文件 ||| 原样 ||| 改成 ||| 这条注入本该被哪类判据抓到
 INJ=(
+  "game.ts|||  s.runStats.bestStage = Math.max(s.runStats.bestStage, s.score);|||  s.runStats.bestStage = 0;|||分享新牌：重做抹掉整局最高流水"
+  "special-cards.ts|||chips=12*Math.min(4,seats)|||chips=12*Math.min(3,seats)|||分享新牌：会客封顶错误"
+  "special-cards.ts|||Math.floor(money)|||Math.ceil(money)|||分享新牌：账票碎银也算整镑"
+  "special-cards.ts|||2*(handIndex+1)|||2*handIndex|||分享新牌：余烬首手不发倍注"
+  "special-cards.ts|||x.id!==c.id&&x.rank===c.rank|||x.rank===c.rank|||分享新牌：镜面对自己触发"
+  "special-cards.ts|||if(held.length>=3)|||if(held.length>=2)|||分享新牌：压舱少留一张也触发"
+  "special-cards.ts|||index===live.length-1|||index===0|||分享新牌：彗尾首张触发"
+  "game.ts|||  s.runStats.bestHand = Math.max(s.runStats.bestHand, res.value);|||  s.runStats.bestHand = 0;|||分享新牌：最佳单手没入账"
+  "game.ts|||if (op.to === 'hand') {|||if (false) {|||分享新牌：直接赠牌仍进待抽堆"
+  "game.ts|||  g.record('event', \`\${def.name}：\${result}\`);|||Ø|||分享新牌：事件选择没记录"
+  "save.ts|||if (!isNum(g.score) || (g.score as number) < 0) return null;|||if (!isInt(g.score, 0)) return null;|||分享新牌：小数流水合法存档被拒"
+  "run-summary.ts|||bestStage:Math.max(0,s.score,s.runStats.bestStage??0,...s.ledger.map((r)=>r.best))|||bestStage:Math.max(0,...s.ledger.map((r)=>r.best))|||分享新牌：战报最高漏当前失手"
+  "run-summary.ts|||r.curve.length<=45|||r.curve.length<=450|||分享新牌：恶意战报无限曲线"
   "rng.ts|||Math.imul(calls >>> 0, 0x6d2b79f5)|||Math.imul((calls + 1) >>> 0, 0x6d2b79f5)|||可靠性：恢复随机流多走一步"
   "game.ts|||const night = s.stage < 2 ? s.night : s.night + 1;|||const night = s.night;|||可靠性：跨夜抬注预告仍用旧夜数"
   "game.ts|||      if (strandingOnSeatLoss(s, index)) {|||      if (false) {|||可靠性：加注惩罚绕过随身容量保护"

@@ -166,7 +166,82 @@
 
   var mode = new URLSearchParams(location.search).get('uitest') || 'again';
 
-  if (mode === 'reference') {
+  if (mode === 'shareboot' || mode === 'sharebad') {
+    var previous=JSON.stringify(H.game.state),rng=H.game.rand.calls;
+    if(mode==='shareboot'){
+      must('重启后上一局战报入口可见',!q('#btnLastReport').hidden);
+      click('#btnLastReport');
+      must('重启后真实旧战报可预览',!q('#sharecard').classList.contains('hidden')&&!!q('#sharePreview canvas'));
+      must('重启查战报不创建新牌局',JSON.stringify(H.game.state)===previous&&H.game.rand.calls===rng);
+      click('#btnCloseShare');
+      must('关闭后仍回到标题页',!q('#title').classList.contains('hidden')&&q('#sharecard').classList.contains('hidden'));
+    }else{
+      must('损坏的战报不显示旧局入口',q('#btnLastReport').hidden);
+      must('损坏战报不阻止正常入席',!q('#title').classList.contains('hidden')&&!q('#btnStart').disabled);
+    }
+  } else if (mode === 'share') {
+    H.start(4242);
+    click('#tray .card'); click('#btnPlay');
+    untilIdle(performance.now(), function () {
+      var state=H.game.state;
+      must('真实点击出牌留下整局统计',state.runStats.plays===1&&state.runStats.bestHand>0);
+      // 夹具只决定结束姿态；数据仍来自上面实际点击的计分链。
+      state.status='lost';state.decisions.push({kind:'event',night:1,stage:0,hand:1,text:'彗星来信：彗尾牌直接入手'});
+      state.hand[0].special='comet';H.render();
+      must('稀奇牌手牌角标显示名称',!!q('#tray .rare-comet .rare-badge')&&q('#tray .rare-comet .rare-badge').textContent.indexOf('彗尾牌')>=0);
+      must('稀奇牌可访问名称解释触发条件',q('#tray .rare-comet').getAttribute('aria-label').indexOf('最后计分')>=0);
+      H.showEnd(false);
+      var report=JSON.parse(read('guinea.last-report.v1'));
+      must('散场写入有效战报',!!report);
+      if(!report){window.__UITEST_RESULT=verdict('分享与稀奇牌');return;}
+      must('散场保存真实战报统计与选择',report.plays===1&&report.seed===4242&&report.choices.some(function(x){return x.indexOf('彗星来信')>=0;}));
+      must('战报含最终稀奇牌',report.rareCards.indexOf('彗尾牌')>=0);
+      must('上一局战报入口可见',!q('#btnLastReport').hidden);
+      q('#btnShareRun').focus();click('#btnShareRun');
+      var before=JSON.stringify(state),calls=H.game.rand.calls;
+      must('结束分享按钮打开图片预览',!q('#sharecard').classList.contains('hidden'));
+      var canvas=q('#sharePreview canvas');
+      must('图片分辨率1200×1740且可编码PNG',canvas.width===1200&&canvas.height===1740&&canvas.toDataURL().indexOf('data:image/png;base64,')===0);
+      var pixel=canvas.getContext('2d').getImageData(100,200,1,1).data;
+      must('图片已绘制且无透明背景',pixel[3]===255&&pixel[0]<100);
+      must('打开分享聚焦保存按钮',document.activeElement===q('#btnExportReport'));
+      var rect=q('#btnExportReport').getBoundingClientRect();
+      must('导出控件在可见窗口内',rect.top>0&&rect.bottom<innerHeight);
+      q('#btnCloseShare').focus();key(document.activeElement,'Tab');
+      must('分享弹窗Tab末端回到首控件',document.activeElement===q('#btnExportReport'));
+      key(document.body,'x');key(document.body,' ');key(document.body,'Enter');
+      must('分享弹窗快捷键不改游戏或随机流',JSON.stringify(state)===before&&H.game.rand.calls===calls);
+      var steps=[['#btnExportReport','图片已保存'],['#btnCopyReport','分享文案已复制'],['#btnSystemShare','已打开系统分享菜单']];
+      function next(i){
+        if(i===steps.length){
+          key(document.activeElement,'Escape');
+          must('Escape关闭分享并还原焦点',q('#sharecard').classList.contains('hidden')&&document.activeElement===q('#btnShareRun'));
+          H.start(4243);click('#btnLastReport');
+          must('新局还能查阅上一局战报',!q('#sharecard').classList.contains('hidden')&&read('guinea.last-report.v1')===JSON.stringify(report));
+          click('#btnCloseShare');click('#btnCodex');click('[data-tab="rare"]');
+          must('稀奇牌图鉴六种完整说明',document.querySelectorAll('.rare-entry').length===6&&q('#codex').textContent.indexOf('压舱牌')>=0);
+          H.closePanels();q('#title').classList.remove('hidden');var old=H.prefsCopy.flags.events;
+          click('#btnEventsToggle');
+          must('标题奇遇开关实际更新新局偏好',H.prefsCopy.flags.events!==old&&q('#btnEventsToggle').getAttribute('aria-pressed')===String(!old));
+          H.start(4244);must('下一局真正采用奇遇偏好',H.game.state.flags.events===!old);
+          H.game.state.flags.events=true;H.game.state.pendingEvent=['embers','looking-glass','comet-letter'];H.render();
+          must('赠牌事件选择前就能查明三种牌性',document.querySelectorAll('#eventRow .ev-gift').length===3&&q('[data-eid="looking-glass"] .ev-gift').textContent.indexOf('+6')>=0);
+          click('[data-eid="embers"]');
+          must('真点赠牌事件后新牌显示在手中',!!q('#tray .rare-ember')&&H.game.state.pendingEvent.length===0);
+
+          window.__UITEST_RESULT=verdict('分享与稀奇牌');return;
+        }
+        click(steps[i][0]);var started=performance.now();
+        (function poll(){
+          if(q('#shareStatus').textContent.indexOf(steps[i][1])>=0){must('原生桥回执 '+steps[i][1],true);next(i+1);return;}
+          if(performance.now()-started>5000){must('原生桥回执 '+steps[i][1]+'（实测 '+q('#shareStatus').textContent+'）',false);window.__UITEST_RESULT=verdict('分享与稀奇牌');return;}
+          setTimeout(poll,30);
+        })();
+      }
+      next(0);
+    });
+    return '';
+  } else if (mode === 'reference') {
     q('#title').classList.remove('hidden');
     must('开局自定选项默认收起', !q('#startOptions').open);
     must('玩法与入席位于折叠区外', !q('#startOptions').contains(q('#modes')) && !q('#startOptions').contains(q('#btnStart')));
@@ -188,7 +263,7 @@
     state.discovered = [];
     click('#btnCodex');
     must('读图鉴时教学提示不遮住内容', !H.tutor().visible && !H.guide().visible);
-    must('图鉴可查询六类内容', document.querySelectorAll('.reference-tabs button').length === 6);
+    must('图鉴可查询七类内容', document.querySelectorAll('.reference-tabs button').length === 7);
     must('常用十种牌型有真实示例', document.querySelectorAll('.hand-example').length === 10);
     must('高牌示例只有一张参与计分', document.querySelectorAll('[data-kind="high"] .counts').length === 1);
     must('对子示例只有两张参与计分', document.querySelectorAll('[data-kind="pair"] .counts').length === 2);
@@ -2063,6 +2138,7 @@
     if (danger) { danger.click(); danger.click(); }   // 两步确认；无头里那个 3 秒回弹的定时器是冻结的
     must('清空进度后回到标题页', !q('#title').classList.contains('hidden'));
     must('清空后没有残留存档', read('guinea.save.v1') === null);
+    must('清空后删除上一局战报与入口',read('guinea.last-report.v1')===null&&q('#btnLastReport').hidden);
     store('guinea.save.v1', 'garbage');
     click('#btnResume');
     must('坏档点续局给的是提示不是崩溃', (q('#resumeNote').textContent || '').indexOf('读不出来') >= 0);

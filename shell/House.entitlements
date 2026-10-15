@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Mac App Store 要求 App Sandbox。这个 App 不联网、不读写用户文件、不加载远程内容，
-     所以沙盒只需要开起来，不需要任何 additional entitlement。
+<!-- Mac App Store 要求 App Sandbox。这个 App 不联网、不加载远程内容。分享战报使用 NSSavePanel，
+     仅获得玩家明确选择的导出文件位置，不开放任意文件读写。
      仅 CHANNEL=app-store 使用；本地试玩与 Developer ID 公证包不带沙盒。 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -9,6 +9,6 @@
   <key>com.apple.security.network.client</key><false/>
   <key>com.apple.security.network.server</key><false/>
   <key>com.apple.security.device.audio-input</key><false/>
-  <key>com.apple.security.files.user-selected.read-only</key><false/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
 </dict>
 </plist>

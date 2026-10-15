@@ -9,6 +9,7 @@ import type { Effect, PatronCtx, PatronDef, Seat } from './effects.ts';
 import { editionEffect } from './effects.ts';
 import type { BossDef } from './content.ts';
 import { patronById } from './content.ts';
+import { specialEffect } from './special-cards.ts';
 import type { Rand } from './rng.ts';
 import type { ThresholdDef } from './thresholds.ts';
 import { crossedThresholds, MAX_PER_HAND, MAX_PER_STAGE } from './thresholds.ts';
@@ -27,7 +28,7 @@ export interface Snap {
 export type ScoreEvent =
   | { t: 'hand'; kind: HandKind; level: number; after: Snap }
   | { t: 'blocked'; id: number; why: string; after: Snap }
-  | { t: 'card'; id: number; addChips: number; addMult: number; xmult: number; after: Snap }
+  | { t: 'card'; id: number; addChips: number; addMult: number; xmult: number; note?: string; after: Snap }
   | { t: 'patron'; pid: string; addChips: number; addMult: number; xmult: number; note: string; cardId: number | null; after: Snap }
   // P0-3 阈值达成。走的是同一条 chips/mult 链，所以它只是链上的一个节点，不是新维度
   | { t: 'bonus'; source: string; tid: string; addChips: number; addMult: number; xmult: number; after: Snap }
@@ -298,10 +299,12 @@ export function score(input: ScoreInput): ScoreResult {
         if (c.enh === 'glass') xmult *= 2;
         if (c.seal === 'blue') addChips += BLUE_SEAL_CHIPS * blueCount;
       }
+      const rare = specialEffect(c, live, held, env.money, roster.length, env.handIndex, i);
+      addChips += rare.chips; addMult += rare.mult; xmult *= rare.xmult;
       chips += addChips;
       mult += addMult;
       if (xmult !== 1) mult *= xmult;
-      push({ t: 'card', id: c.id, addChips, addMult, xmult });
+      push({ t: 'card', id: c.id, addChips, addMult, xmult, ...(rare.note ? { note:rare.note } : {}) });
       if (L) money += layerMoney(c);
       else if (c.seal === 'gold') money += 1; 
 

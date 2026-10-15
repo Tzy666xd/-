@@ -14,20 +14,18 @@
 import type { Effect, Mods, Rarity, Temperament } from './effects.ts';
 import type { Enh, HandKind, Seal, Suit } from './hands.ts';
 import { Rand } from './rng.ts';
+import type { SpecialKind } from './special-cards.ts';
 
 /** 一条修正活多久：下一手 / 这一夜 / 这一局 */
 export type EventScope = 'hand' | 'night' | 'run';
 
-/**
- * 事件要往牌堆里塞的牌。强化与火漆**只用现有那几轴**，不另造新 enum：
- * 新 id 会让"关掉 layers 也要同分"那条 80 手对照判据断掉，而且新牌在没有 layers
- * 的那条路上根本没有执行者——一张什么都不做的牌比没有这张牌更糟。
- */
+/** 事件赠牌保留现有强化与蜡封；稀奇牌身份另行记录，两个计分路径均支持。 */
 export interface NewCard {
   rank: number;
   suit: Suit;
   enh?: Enh;
   seal?: Seal;
+  special?: SpecialKind;
 }
 
 /** 一条操作。game.ts 的 applyEventOp 是它唯一的执行者，这里每加一种它就得接一种。 */
@@ -46,7 +44,7 @@ export type EventOp =
    */
   | { t: 'score'; e: Effect; scope: EventScope; hands?: number }
   /** 往牌堆里加牌（受 MAX_DECK 上界约束） */
-  | { t: 'addCard'; cards: NewCard[] }
+  | { t: 'addCard'; cards: NewCard[]; to?: 'deck' | 'hand' }
   /** 复制手上的牌放进牌堆（誊抄那条路的公用件） */
   | { t: 'copyHand'; n: number }
   /** 给若干张牌落一道强化或火漆；value 写 'random' 就从现有那几种里摇 */
@@ -429,6 +427,14 @@ export const EVENTS: EventDef[] = [
 ];
 
 /** 已知 id 集合：存档与自检拿它验"档里不许出现没听说过的事件"。 */
+EVENTS.push(
+  { id:'visiting-card',name:'来客的名片',kicker:'一张带家纹的黑桃 K，留给你的牌局。',blurb:'付 £3，获得一张黑桃 K「会客牌」进入牌组。',risk:'head',once:true,cond:[{t:'moneyAtLeast',n:3},{t:'deckRoom'}],ops:[{t:'money',n:-3},{t:'addCard',cards:[{rank:13,suit:'s',special:'crest'}]}] },
+  { id:'banknote',name:'旧账房的票据',kicker:'存得住钱，票据就替你撑住流水。',blurb:'付 £2，获得一张方片 8「账票牌」进入牌组。',risk:'head',once:true,cond:[{t:'moneyAtLeast',n:2},{t:'deckRoom'}],ops:[{t:'money',n:-2},{t:'addCard',cards:[{rank:8,suit:'d',special:'ledger'}]}] },
+  { id:'embers',name:'壁炉里的余烬',kicker:'牌递到手中，越到后面越亮。',blurb:'获得一张红心 7「余烬牌」直接入手，本夜彩头 ×1.1。手满时原来最右一张进弃牌堆。',risk:'head',once:true,cond:[{t:'deckRoom'}],ops:[{t:'rule',m:{targetScale:1.1},scope:'night'},{t:'addCard',to:'hand',cards:[{rank:7,suit:'h',special:'ember'}]}] },
+  { id:'looking-glass',name:'镜匠的礼物',kicker:'凑出同点数时，镜子才显出另一面。',blurb:'付 £3，获得一张梅花 Q「镜面牌」直接入手。手满时原来最右一张进弃牌堆。',risk:'head',once:true,cond:[{t:'moneyAtLeast',n:3},{t:'deckRoom'}],ops:[{t:'money',n:-3},{t:'addCard',to:'hand',cards:[{rank:12,suit:'c',special:'mirror'}]}] },
+  { id:'captains-keepsake',name:'船长的压舱物',kicker:'留下余地，下一手才有分量。',blurb:'付 £2，获得一张黑桃 A「压舱牌」进入牌组。',risk:'hand',once:true,cond:[{t:'moneyAtLeast',n:2},{t:'deckRoom'}],ops:[{t:'money',n:-2},{t:'addCard',cards:[{rank:14,suit:'s',special:'anchor'}]}] },
+  { id:'comet-letter',name:'彗星来信',kicker:'把最后一拍交给这张新牌。',blurb:'获得一张红心 10「彗尾牌」直接入手，本夜少 1 次弃牌。手满时原来最右一张进弃牌堆。',risk:'head',once:true,cond:[{t:'deckRoom'}],ops:[{t:'rule',m:{discards:-1},scope:'night'},{t:'addCard',to:'hand',cards:[{rank:10,suit:'h',special:'comet'}]}] },
+);
 export const EVENT_IDS = new Set(EVENTS.map((e) => e.id));
 
 export const eventById = (id: string): EventDef | undefined =>
@@ -513,7 +519,8 @@ export function eventTags(e: EventDef): string[] {
       if (op.t === 'money' || op.t === 'rep') push('银钱');
       else if (op.t === 'rule') push('规矩');
       else if (op.t === 'score') push('计分');
-      else if (op.t === 'addCard' || op.t === 'copyHand' || op.t === 'mark' || op.t === 'strip'
+      else if (op.t === 'addCard') { push('牌组'); if(op.cards.some(c=>c.special))push('稀奇牌');if(op.to==='hand')push('入手'); }
+      else if (op.t === 'copyHand' || op.t === 'mark' || op.t === 'strip'
         || op.t === 'purge' || op.t === 'returnDiscard' || op.t === 'mulligan') push('牌组');
       else if (op.t === 'seat' || op.t === 'grantSeat') push('客人');
       else if (op.t === 'grantLetter' || op.t === 'bookUp') push('货单');

@@ -105,6 +105,10 @@ scene 32-start-options "document.documentElement.dataset.snap='1';window.__H.set
 scene 33-patrons "document.querySelector('#btnCodex').click();document.querySelector('[data-tab=patrons]').click();"
 scene 34-deck "document.querySelector('#btnDeck').click();"
 scene 35-loss-review "var H=window.__H;H.start(4242);document.querySelector('#tray .card').click();document.querySelector('#btnPlay').click();H.game.state.status='lost';H.game.state.handsLeft=0;H.showEnd(false);"
+scene 36-share "var H=window.__H;H.start(4242);H.seat('hobbs');H.seat('rent');var s=H.game.state;s.status='lost';s.night=3;s.stage=2;s.money=23;s.rep=4;s.score=1980;s.flags.events=true;s.runStats={plays:24,discards:11,bestHand:1320,bestStage:1980,totalScore:9480,handUse:{pair:12,two:8,high:4},partial:false};s.ledger=[220,360,580,750,930,1220,1640,1800].map(function(v,i){return {night:1+Math.floor(i/3),stage:['open','feast','boss'][i%3],label:'便宴',target:v-20,best:v,reward:4,profit:1,money:20,raised:0,rep:0};});s.decisions=s.decisions.concat([{kind:'hire',night:1,stage:0,hand:0,text:'£3 请进管家霍布斯'},{kind:'event',night:2,stage:1,hand:2,text:'镜匠的礼物：付 £3，梅花 Q（镜面牌）直接入手'},{kind:'raise',night:2,stage:2,hand:0,text:'下一场抬注 2 档'},{kind:'item',night:3,stage:0,hand:1,text:'对子谱：对子升至 3 级'}]);s.hand[0].special='mirror';H.render();H.showEnd(false);document.querySelector('#btnShareRun').click();"
+scene 37-rarecards "var H=window.__H;H.start(4242);['crest','ledger','ember','mirror','anchor','comet'].forEach(function(id,i){H.game.state.hand[i].special=id;});H.render();"
+scene 38-rare-events "var H=window.__H;H.start(4242);H.game.state.flags.events=true;H.game.state.pendingEvent=['embers','looking-glass','comet-letter'];H.render();"
+scene 39-rare-catalog "document.querySelector('#btnCodex').click();document.querySelector('[data-tab=rare]').click();"
 [[ $fails -eq 0 ]] || { echo "SHOTS FAIL：${fails} 张没生成"; exit 1; }
 python3 tools/stylesheet.py "$OUT" || exit 1
 

@@ -28,6 +28,7 @@ export interface Card {
   suit: Suit;
   enh: Enh;
   seal: Seal;
+  special?: import('./special-cards.ts').SpecialKind;
 }
 
 export type HandKind =

@@ -8,6 +8,7 @@ import {
 } from './game.ts';
 import type { GameState } from './game.ts';
 import { evaluate } from './hands.ts';
+import { SPECIALS } from './special-cards.ts';
 import { PATRONS, LETTERS, BOSSES } from './content.ts';
 import { FLAG_KEYS, FLAGS_ALL, FLAGS_OFF } from './flags.ts';
 import { THRESHOLDS } from './thresholds.ts';
@@ -60,6 +61,12 @@ function check(s: GameState, ctx: string): void {
   bad('手牌为负', s.hand.length >= 0);
   bad('声望非法', finite(s.rep) && s.rep >= 0);
   bad('累计流水非法', finite(s.score) && s.score >= 0);
+  bad('整局统计非法', Number.isSafeInteger(s.runStats.plays) && s.runStats.plays >= 0
+    && Number.isSafeInteger(s.runStats.discards) && s.runStats.discards >= 0
+    && finite(s.runStats.bestHand) && s.runStats.bestHand >= 0
+    && finite(s.runStats.bestStage) && s.runStats.bestStage >= 0
+    && finite(s.runStats.totalScore) && s.runStats.totalScore >= s.runStats.bestHand);
+  bad('决策记录无限增长', s.decisions.length <= 120);
   bad('彩头非正', targetOf(s) > 0 && finite(targetOf(s)));
   bad('出牌次数为负', s.handsLeft >= 0);
   bad('弃牌次数为负', s.discardsLeft >= 0);
@@ -71,7 +78,7 @@ function check(s: GameState, ctx: string): void {
   bad('状态字非法', ['playing', 'cleared', 'shop', 'won', 'lost'].includes(s.status));
   bad('抬注层数越界', s.raiseNext >= 0 && s.raiseNext <= 4 && s.raisedHere >= 0 && s.raisedHere <= 4);
   for (const c of [...s.hand, ...s.table, ...s.deck, ...s.discardPile]) {
-    if (!finite(c.rank) || c.rank < 2 || c.rank > 14) { rep.worst.push(`牌面点数非法 — ${ctx} ${JSON.stringify(c)}`); break; }
+    if (!finite(c.rank) || c.rank < 2 || c.rank > 14 || (c.special !== undefined && !SPECIALS.some(x=>x.id===c.special))) { rep.worst.push(`牌面点数非法 — ${ctx} ${JSON.stringify(c)}`); break; }
   }
   // ── 新功能带进来的那几份状态 ────────────────────────────────
   bad('已领阈值有不存在的 id 或重复领',

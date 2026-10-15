@@ -5,6 +5,7 @@ import { HANDS, SUITS, SUIT_GLYPH, SUIT_NAME, RANK_LABEL, SECRET_HANDS, evaluate
 import { PATRONS, LETTERS, VOUCHERS, BOOKS } from '../core/content.ts';
 import { RARITY_LABEL, HOOK_LABEL } from '../core/effects.ts';
 import { materialById, sealById } from '../core/layers.ts';
+import { specialById } from '../core/special-cards.ts';
 
 const node = (tag: string, cls = '', text = ''): HTMLElement => {
   const n = document.createElement(tag); n.className = cls; n.textContent = text; return n;
@@ -104,7 +105,8 @@ export function renderDeck(body: HTMLElement, state: GameState): void {
       item.append(node('b', '', `${RANK_LABEL(c.rank)}${SUIT_GLYPH[c.suit]}`), node('small', '', name));
       if (c.enh !== 'none') item.append(node('small', '', materialById(c.enh).name));
       if (c.seal !== 'none') item.append(node('small', '', sealById(c.seal).name));
-      item.title = [materialById(c.enh).line, sealById(c.seal).line].join('；'); grid.append(item);
+      const rare=specialById(c.special);if(rare)item.append(node('small','rare-label',`${rare.glyph} ${rare.name}`));
+      item.title = [materialById(c.enh).line, sealById(c.seal).line,rare?.blurb].filter(Boolean).join('；'); grid.append(item);
     }
     if (!cards.length) grid.append(node('p', 'reference-note', '这个范围没有牌。'));
   };

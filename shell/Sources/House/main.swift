@@ -9,6 +9,7 @@
 //      抬到 screenSaver 并 activate，保证定时器真的在跑。
 import Cocoa
 import WebKit
+import UniformTypeIdentifiers
 
 let SCHEME = "app"
 var VERBOSE = false
@@ -103,6 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   private var size: NSSize?
   private var shotTaken = false
   private var failed = false
+  private var exportTestDir: String?
+  private var sharePicker: NSSharingServicePicker?
 
   func configure(_ args: [String]) {
     func val(_ flag: String) -> String? {
@@ -113,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     probeOut = val("--probe-out")
     probeBlank = args.contains("--probe-blank")
     uiTestPath = val("--uitest")
+    if uiTestPath != nil || shotPath != nil { exportTestDir = val("--export-dir") }
     burstOffsets = (val("--burst") ?? "").split(separator: ",").compactMap { Int($0) }
     animJS = val("--anim")
     tickMs = Int(val("--tick") ?? "") ?? 0
@@ -139,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // 测试的 clear()/fixture 只能影响临时数据，不能覆盖玩家的真实存档和偏好。
     if shotPath != nil || uiTestPath != nil || probeBlank { config.websiteDataStore = .nonPersistent() }
     config.setURLSchemeHandler(ResourceHandler(webRoot: webRoot), forURLScheme: SCHEME)
+    config.userContentController.add(self, name: "guinea")
     if !probeBlank { config.userContentController.add(self, name: "log") }   // 二分：探针模式下不注册消息处理器
     // 只用公开 API：对私有键做 KVC 既是审核驳回点，在 App Sandbox 下还会让 WebKit 卡住。
     // 13.0–13.2 没有公开的可调试开关，那就退化成"不能调试"，不去碰私有键。
@@ -233,7 +238,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
   func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 
   func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
+    if message.name == "guinea" { handleShare(message); return }
     log("页面", message.body)
+  }
+
+  private func shareResult(_ id: Int, _ status: String, _ detail: String = "") {
+    let obj: [String: Any] = ["id":id,"status":status,"detail":detail]
+    guard let data = try? JSONSerialization.data(withJSONObject: obj), let json = String(data:data,encoding:.utf8) else { return }
+    web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('guinea-export',{detail:\(json)}));", completionHandler:nil)
+  }
+
+  private func handleShare(_ message: WKScriptMessage) {
+    guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.`protocol` == SCHEME,
+      message.frameInfo.securityOrigin.host == "local", let body=message.body as? [String:Any],
+      let id=body["id"] as? Int, let action=body["action"] as? String else { return }
+    if action == "copy", let text=body["text"] as? String, text.utf8.count <= 20000 {
+      if uiTestPath == nil && shotPath == nil { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
+      shareResult(id,"copied"); return
+    }
+    guard action == "export" || action == "share", let encoded=body["png"] as? String, encoded.utf8.count <= 20000000,
+      let data=Data(base64Encoded:encoded), data.starts(with:[137,80,78,71,13,10,26,10]),
+      let image=NSImage(data:data), image.size.width <= 4096, image.size.height <= 4096 else {
+      shareResult(id,"error","分享图片无效，请重试。"); return
+    }
+    if action == "share" {
+      if uiTestPath == nil && shotPath == nil {
+        let picker=NSSharingServicePicker(items:[image]); sharePicker=picker
+        picker.show(relativeTo:NSRect(x:web.bounds.midX,y:web.bounds.midY,width:1,height:1),of:web,preferredEdge:.minY)
+      }
+      shareResult(id,"presented"); return
+    }
+    let supplied=body["name"] as? String ?? "几尼-对局分享.png"
+    let name=String(supplied.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." }.prefix(100))
+    if let dir=exportTestDir {
+      do {
+        let folder=URL(fileURLWithPath:dir,isDirectory:true); try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let url=folder.appendingPathComponent(name.hasSuffix(".png") ? name : "几尼-对局分享.png")
+        try data.write(to:url,options:.atomic); shareResult(id,"saved",url.path)
+      } catch { shareResult(id,"error","图片保存失败，请重试。") }
+      return
+    }
+    let panel=NSSavePanel(); panel.allowedContentTypes=[.png];panel.nameFieldStringValue=name;panel.title="保存对局分享图片"
+    panel.beginSheetModal(for:window) { [weak self] response in
+      guard let self=self else{return}
+      guard response == .OK, let url=panel.url else{self.shareResult(id,"cancelled");return}
+      do{try data.write(to:url,options:.atomic);self.shareResult(id,"saved",url.path)}
+      catch{self.shareResult(id,"error","图片保存失败，请换一个位置重试。")}
+    }
   }
 
   private var navigated = false

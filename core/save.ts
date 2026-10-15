@@ -14,6 +14,8 @@ import { THRESHOLDS } from './thresholds.ts';
 import { STEP_IDS } from './tutorial.ts';
 import { LESSON_IDS, MARKER } from './guide.ts';
 import { EVENT_IDS } from './events.ts';
+import { SPECIALS } from './special-cards.ts';
+import { newRunStats } from './run-record.ts';
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = 'guinea.save.v1';
@@ -48,7 +50,8 @@ function cardOk(c: unknown): c is Card {
     && isInt(x.rank, 2, 14)
     && isStr(x.suit) && SUIT_SET.has(x.suit)
     && isStr(x.enh) && ENH_SET.has(x.enh)
-    && isStr(x.seal) && SEAL_SET.has(x.seal);
+    && isStr(x.seal) && SEAL_SET.has(x.seal)
+    && (x.special === undefined || (isStr(x.special) && SPECIALS.some((s)=>s.id===x.special)));
 }
 
 /** 结构校验。返回 null 表示这份存档不可信，调用方应当直接丢弃 */
@@ -60,6 +63,20 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   const s = o.state;
   if (typeof s !== 'object' || s === null) return null;
   const g = s as Record<string, unknown>;
+  if (g.decisions !== undefined && (!isArr(g.decisions) || g.decisions.length > 120 || !g.decisions.every((d) => {
+    if (typeof d !== 'object' || d === null) return false;
+    const x = d as Record<string, unknown>;
+    return isStr(x.kind) && ['start','hire','sell','raise','event','item'].includes(x.kind)
+      && isInt(x.night,1,100000) && isInt(x.stage,0,2) && isInt(x.hand,0,99) && isStr(x.text) && x.text.length <= 240;
+  }))) return null;
+  if (g.runStats !== undefined) {
+    if (typeof g.runStats !== 'object' || g.runStats === null || Array.isArray(g.runStats)) return null;
+    const r = g.runStats as Record<string,unknown>;
+    if (!isInt(r.plays,0,Number.MAX_SAFE_INTEGER) || !isInt(r.discards,0,Number.MAX_SAFE_INTEGER) || !isNum(r.bestHand) || (r.bestHand as number) < 0 || !isNum(r.totalScore) || (r.totalScore as number) < 0
+      || typeof r.partial !== 'boolean' || typeof r.handUse !== 'object' || r.handUse === null || Array.isArray(r.handUse)) return null;
+    if (r.bestStage !== undefined && (!isNum(r.bestStage) || (r.bestStage as number) < 0)) return null;
+    if (!Object.entries(r.handUse as object).every(([k,v])=>KIND_SET.has(k)&&isInt(v,0,r.plays as number))) return null;
+  }
 
   if (!isInt(g.seed, 0) || !isStr(g.deckId) || !DECK_SET.has(g.deckId)) return null;
   // 档位专属牌组与局长必须配得上：nights 是能单独改的那一格，改完它就能把
@@ -73,7 +90,7 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   if (g.mode !== undefined && (!isStr(g.mode) || !MODE_SET.has(g.mode))) return null;
   if (!isNum(g.money) || (g.money as number) < 0) return null;
   if (!isNum(g.rep) || (g.rep as number) < 0) return null;
-  if (!isInt(g.score, 0)) return null;
+  if (!isNum(g.score) || (g.score as number) < 0) return null;
   for (const k of ['raiseNext', 'raisedHere', 'handsLeft', 'discardsLeft',
     'handIndex', 'discardsUsed', 'rerolls'] as const) {
     if (!isInt(g[k], 0, 99)) return null;
@@ -234,6 +251,7 @@ export function serialize(g: Game): string {
       signature: s.signature, tutorial: s.tutorial, guide: s.guide,
       eventAt: s.eventAt, nightActions: s.nightActions, pendingEvent: s.pendingEvent,
       events: s.events, eventMods: s.eventMods,
+      runStats: s.runStats, decisions: s.decisions,
     },
   });
 }
@@ -248,6 +266,7 @@ const STATE_KEYS = [
   'shop', 'rerolls', 'ledger', 'discovered', 'settlement', 'endless', 'diff', 'mode', 'log',
   'flags', 'claimed', 'betReprieves', 'buffer', 'signature', 'tutorial', 'guide',
   'eventAt', 'nightActions', 'pendingEvent', 'events', 'eventMods', 'nights',
+  'runStats', 'decisions',
 ] as const;
 
 function assignWhitelisted(to: Record<string, unknown>, from: Record<string, unknown>): void {
@@ -263,6 +282,12 @@ export function deserialize(text: string): Game | null {
   const g = new Game(ok.state.seed, ok.state.deckId, ok.state.endless);
   assignWhitelisted(g.state as unknown as Record<string, unknown>,
     ok.state as unknown as Record<string, unknown>);
+  if (!ok.state.runStats) g.state.runStats = {...newRunStats(), partial:true};
+  if (g.state.runStats.bestStage === undefined) {
+    g.state.runStats.bestStage = Math.max(g.state.score, 0, ...g.state.ledger.map(r=>r.best));
+    g.state.runStats.partial = true;
+  }
+  g.state.decisions = ok.state.decisions ?? [];
   // 开关与认领账要过一遍清洗：assignWhitelisted 只保证键在白名单里，不管值长什么样。
   // 缺 flags（新功能上线前存的档）就落在构造期的 FLAGS_OFF 上——新功能默认关，
   // 老档照样能读，而且不会读出"半个开关状态"。

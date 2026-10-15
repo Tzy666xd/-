@@ -9,6 +9,9 @@ import type { Card, HandKind, Suit, Seal, Enh } from './hands.ts';
 import { SUITS, SECRET_HANDS, RANK_LABEL, SUIT_NAME, SEAL_NAME } from './hands.ts';
 import { evaluate, HANDS, handBase } from './hands.ts';
 import { Rand } from './rng.ts';
+import { specialById } from './special-cards.ts';
+import { newRunStats } from './run-record.ts';
+import type { RunStats, RunDecision, DecisionKind } from './run-record.ts';
 import { score } from './scoring.ts';
 import type { ScoreResult } from './scoring.ts';
 import type { PatronDef, Mods, Seat, Edition } from './effects.ts';
@@ -121,6 +124,8 @@ export interface ShopSlot {
 }
 
 export interface GameState {
+  runStats: RunStats;
+  decisions: RunDecision[];
   seed: number;
   deckId: string;
   night: number;
@@ -519,6 +524,11 @@ export function play(g: Game): ScoreResult | null {
 
   s.money += res.money;
   s.score += res.value;
+  s.runStats.bestStage = Math.max(s.runStats.bestStage, s.score);
+  s.runStats.plays += 1;
+  s.runStats.totalScore += res.value;
+  s.runStats.bestHand = Math.max(s.runStats.bestHand, res.value);
+  s.runStats.handUse[result.kind] = (s.runStats.handUse[result.kind] ?? 0) + 1;
   // P1-2 长进的记账：这一手里**真的触发过**的那几位才涨 XP。
   // 从事件流里取，而不是重新判一遍条件——这样"演出来的"和"记下来的"是同一件事。
   if (s.flags.growth) {
@@ -678,6 +688,7 @@ export function discard(g: Game): number {
   s.chosen = s.chosen.filter((id) => s.hand.some((c) => c.id === id));
   s.discardsLeft -= 1;
   s.discardsUsed += 1;
+  s.runStats.discards += 1;
 
   let money = 0;
   const lim = limits(s);
@@ -887,6 +898,7 @@ function resolveEvent(g: Game, id: string, drawn = -1): string | null {
   // 事件可能把上限压低了（招灵会那种）：多出来的按既有规矩搁进弃牌堆，而不是硬留在手上
   trimHand(g);
   g.note(`${def.name}：${result}`);
+  g.record('event', `${def.name}：${result}`);
   return result;
 }
 
@@ -910,7 +922,7 @@ function modLine(m: Mods, scope: EventScope): string {
 }
 
 function cardLabel(c: Card): string {
-  const mark = c.enh !== 'none' ? materialById(c.enh).name
+  const mark = c.special ? specialById(c.special)?.name : c.enh !== 'none' ? materialById(c.enh).name
     : c.seal !== 'none' ? sealById(c.seal).name : '';
   return `${SUIT_NAME[c.suit]}${RANK_LABEL(c.rank)}${mark ? `（${mark}）` : ''}`;
 }
@@ -959,10 +971,19 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
       if (totalCards(s) >= MAX_DECK) { out.push('牌堆已满，加不下了'); return; }
       const card: Card = {
         id: uid++, rank: c.rank, suit: c.suit, enh: c.enh ?? 'none', seal: c.seal ?? 'none',
+        ...(c.special ? {special:c.special} : {}),
       };
-      s.deck.push(card);
-      g.rand.shuffle(s.deck);
-      out.push(`${cardLabel(card)}进牌堆`);
+      if (op.to === 'hand') {
+        if (s.hand.length >= limits(s).handSize) {
+          const moved = s.hand.pop(); if (moved) s.discardPile.push(moved);
+        }
+        s.hand.push(card);
+        out.push(`${cardLabel(card)}直接入手`);
+      } else {
+        s.deck.push(card);
+        g.rand.shuffle(s.deck);
+        out.push(`${cardLabel(card)}进牌堆`);
+      }
     }
     return;
   }
@@ -974,7 +995,7 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
       const rolled = g.rand.int(pool.length);        // 有没有人抽都照旧摇这一位：抽牌只换"哪张"，不挪后面的牌序
       const at = drawnAt(pick, pool);                // 只认一次：抽中的那张用掉就作废
       const src = pool[at < 0 ? rolled : at];
-      const copy: Card = { id: uid++, rank: src.rank, suit: src.suit, enh: src.enh, seal: src.seal };
+      const copy: Card = { id: uid++, rank: src.rank, suit: src.suit, enh: src.enh, seal: src.seal, ...(src.special ? {special:src.special} : {}) };
       s.deck.push(copy);
       g.rand.shuffle(s.deck);
       out.push(`誊出${cardLabel(copy)}`);
@@ -1292,6 +1313,7 @@ export function buy(g: Game, i: number): boolean {
   }
   s.money -= slot.price;
   slot.sold = true;
+  g.record('hire', `£${slot.price} 购入${slot.kind === 'patron' ? patronById(slot.pid!).name : slot.kind === 'voucher' ? VOUCHERS.find((v)=>v.id===slot.vid)?.name : slot.item?.t === 'letter' ? letterById(slot.item.id).name : HANDS[slot.item!.id as HandKind].book}`);
   return true;
 }
 
@@ -1409,6 +1431,7 @@ export function sellSeat(g: Game, index: number): boolean {
   s.money += Math.max(1, Math.floor((p.cost + EDITION_PREMIUM[seat.edition]) / 2));
   removeSeat(s, index);
   g.note(`${p.name} 离席`);
+  g.record('sell', `${p.name} 离席`);
   trimHand(g);
 
   return true;
@@ -1421,6 +1444,7 @@ export function useConsumable(g: Game, index: number, targetIds: number[]): bool
   if (c.t === 'book') {
     s.books[c.id] = levelOf(s, c.id) + 1;
     g.note(`${HANDS[c.id].name} 升到 ${s.books[c.id]} 级`);
+    g.record('item', `${HANDS[c.id].book}：升至 ${s.books[c.id]} 级`);
     s.consumables.splice(index, 1);
     return true;
   }
@@ -1459,13 +1483,14 @@ export function useConsumable(g: Game, index: number, targetIds: number[]): bool
         g.note('牌堆已经挤不下了');
         return false;
       }
-      const copy: Card = { id: uid++, rank: t!.rank, suit: t!.suit, enh: t!.enh, seal: t!.seal };
+      const copy: Card = { id: uid++, rank: t!.rank, suit: t!.suit, enh: t!.enh, seal: t!.seal, ...(t!.special ? {special:t!.special} : {}) };
       s.deck.push(copy);
       g.rand.shuffle(s.deck);
       break;
     }
   }
   g.note(l.picks ? `${l.name} 用在了 ${RANK(t!)}${SUITSym(t!.suit)} 上` : `${l.name} 抽到了`);
+  g.record('item', l.picks ? `${l.name} 用在 ${RANK(t!)}${SUITSym(t!.suit)}` : `${l.name}：${g.state.log[0]}`);
   s.consumables.splice(index, 1);
   return true;
 }
@@ -1476,7 +1501,9 @@ export const totalCards = (s: GameState): number =>
 
 // 抬注：不花钱，纯风险决策。抬了就要面对更硬的彩头，但赏金、盈余、客档都跟着涨。
 export function setRaise(g: Game, levels: number): void {
+  const before = g.state.raiseNext;
   g.state.raiseNext = Math.max(0, Math.min(4, levels));
+  if (g.state.raiseNext !== before) g.record('raise', `下一场抬注 ${g.state.raiseNext} 档`);
 }
 
 function leaveShop(g: Game): void {
@@ -1552,6 +1579,7 @@ export class Game {
       flags: mode === 'daily' ? { ...FLAGS_OFF } : { ...FLAGS_OFF, ...(o.flags ?? {}) },
       claimed: [], betReprieves: 0, buffer: START_BUFFER, signature: '', tutorial: [], guide: [],
       eventAt: 0, nightActions: 0, pendingEvent: [], events: [], eventMods: [],
+      runStats: newRunStats(), decisions: [],
     };
     const s = this.state;
     s.money = Math.max(0, s.money + (dk.money ?? 0) + df.money);
@@ -1570,6 +1598,7 @@ export class Game {
       }
     }
     setupStage(s, this.rand);
+    this.record('start', `${dk.name} · ${nights} 夜${s.signature ? ` · 签名宾 ${patronById(s.signature).name}` : ''}`);
   }
 
   /** 读档后要把自增 id 推到已有最大值之后，否则「誊抄」会造出与现有牌撞 id 的牌 */
@@ -1581,6 +1610,12 @@ export class Game {
     this.notes.push(text);
     this.state.log.unshift(text);
     if (this.state.log.length > 40) this.state.log.pop();
+  }
+
+  record(kind: DecisionKind, text: string): void {
+    const s = this.state;
+    s.decisions.push({kind, night:s.night, stage:s.stage, hand:s.handIndex, text:text.slice(0,240)});
+    if (s.decisions.length > 120) s.decisions.splice(1, 1);
   }
 
   // 铺子是"过关"之后的事，由 UI 在动画演完之后调用

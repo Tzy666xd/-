@@ -2238,7 +2238,7 @@ const injected: string[] = [];
   const opened = (): Game => new Game(7777, 'standard', { flags: ON, ...GENTLE });
 
   // ── 数据表自洽 ──
-  t('事件表五十条、id 唯一', EVENTS.length === 50 && new Set(EVENTS.map((e) => e.id)).size === 50);
+  t('事件表五十六条、id 唯一', EVENTS.length === 56 && new Set(EVENTS.map((e) => e.id)).size === 56);
   t('每条都有抬头、场景、白话账与至少一条操作',
     EVENTS.every((e) => e.name.length >= 2 && e.kicker.length >= 6
       && e.blurb.length >= 6 && e.ops.length >= 1));
@@ -3325,6 +3325,8 @@ const injected: string[] = [];
 
 const { runReliability } = await import('../tools/reliability.mjs');
 runReliability(t);
+const { runExpansion } = await import('../tools/expansion-check.mjs');
+runExpansion(t);
 
 console.log(`正向 ${pass} 条通过，失败 ${fails.length} 条`);
 if (fails.length) {
