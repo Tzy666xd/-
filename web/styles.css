@@ -630,10 +630,11 @@ html[data-snap='1'] .coach { animation: none; }
   border-left: 3px solid var(--wood-1);
   box-shadow: -22px 0 50px rgba(0, 0, 0, .6);
   transform: translateX(101%);
+  visibility: hidden;
   /* 抽屉要"撞到位"：末段轻微过冲再回稳，比一路减速贴上来有分量 */
   transition: transform .52s cubic-bezier(.18,.9,.28,1.035), box-shadow .52s var(--ease);
 }
-.panel.open { transform: none; box-shadow: -30px 0 64px rgba(0, 0, 0, .68); }
+.panel.open { visibility: visible; transform: none; box-shadow: -30px 0 64px rgba(0, 0, 0, .68); }
 .panel::before {
   content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
   background: linear-gradient(90deg, rgba(0, 0, 0, .3), transparent);
@@ -727,7 +728,7 @@ table.ledger-t td.loss { color: #8c2030; }
   background: radial-gradient(ellipse at 50% 40%, rgba(16, 10, 4, .82), rgba(6, 4, 2, .95));
   opacity: 1; transition: opacity .5s var(--ease);
 }
-.overlay.hidden { opacity: 0; pointer-events: none; }
+.overlay.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
 .deed {
   width: min(620px, 88vw); max-height: 88vh; overflow-y: auto; text-align: center; padding: 30px 40px 26px;
   border-radius: 8px; color: var(--ink);
@@ -1476,3 +1477,28 @@ html[data-sheet='1'] .card { cursor: default; }
 @media (max-width: 900px) { .share-deed { gap: 20px; padding: 18px; } .share-controls h2 { font-size: 26px; } .marq-right .brass-btn { padding: 7px 9px; } }
 
 .ev-card .ev-gift { margin-top: 10px; padding-top: 9px; border-top: 1px solid #cbb891; color: #315442; font-size: 11px; line-height: 1.6; }
+
+/* 委托簿沿用纸面侧栏；进度、报酬和代价直接写在选项上。 */
+#club { width: min(620px, 85vw); }
+.club-intro { color: #654e2a; font-size: 13px; line-height: 1.8; margin: 0 0 20px; }
+.club-section { border-top: 1px solid rgba(115,85,39,.28); padding: 20px 0; }
+.club-section h3 { font: 600 20px Georgia, 'Songti SC', serif; color: #244d40; margin: 0 0 15px; letter-spacing: .12em; }
+.club-section h4 { margin: 0 0 8px; font-size: 15px; color: #352815; }
+.club-section p { font-size: 13px; line-height: 1.8; margin: 8px 0; }
+.club-muted, .club-history { color: #78674b; }
+.club-history { padding-left: 12px; border-left: 2px solid #c5ad7e; }
+.club-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 14px 0; }
+.club-contract { padding: 16px; border: 1px solid #c3ae85; border-radius: 5px; background: rgba(255,252,240,.44); }
+.club-choice { display: block; width: 100%; padding: 12px 14px; margin-top: 9px; color: #213f33; border: 1px solid #a78b55; background: #f7eed9; border-radius: 4px; text-align: left; font: inherit; font-size: 13px; line-height: 1.7; cursor: pointer; }
+.club-choice:hover:not(:disabled) { background: #e8ddbf; border-color: #506e52; }
+.club-choice:disabled { opacity: .5; cursor: not-allowed; }
+.club-choice:focus-visible { outline: 3px solid #9d7938; outline-offset: 3px; }
+.club-reward { color: #426443; }
+.club-progress { font-weight: 600; color: #315a44; }
+.club-section progress { width: 100%; accent-color: #416c50; height: 12px; }
+.club-ending { padding: 16px; border: 1px solid #ae8f55; background: #eadfc4; color: #30543e; }
+.club-catalog { color: #6e5b3d; font-size: 12px; line-height: 1.8; }
+.club-catalog summary { cursor: pointer; }
+.club-alert { box-shadow: 0 0 0 1px #c4a36a, 0 0 16px #c4a36a33; }
+.club-preset[aria-pressed='true'] { border-color: #d7b66f; background: #284b3d; }
+@media(max-width:1100px) { .marq-right { gap: 5px; } .marq-right .brass-btn { padding-left: 9px; padding-right: 9px; } }

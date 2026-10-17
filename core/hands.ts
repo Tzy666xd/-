@@ -29,6 +29,8 @@ export interface Card {
   enh: Enh;
   seal: Seal;
   special?: import('./special-cards.ts').SpecialKind;
+  /** 收藏/拾遗的蓄力（0..4），债券已兑现次数（0..3）。缺省为 0 */
+  charge?: number;
 }
 
 export type HandKind =

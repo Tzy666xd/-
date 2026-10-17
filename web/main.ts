@@ -6,6 +6,7 @@ import {
   continueEndless, seatedCount, mkSeat, STAGE_LABEL, STAGE_KIND,
   eventChoices, chooseEvent, autoResolveEvent, fanOffer,
   DIFFS, MODES, diffById, modeById, dailySeed,
+  acceptCommission, skipCommission, claimCommission, chooseStory, storyChapter,
 } from './core/game.ts';
 import type { Stage, Mode, Diff } from './core/game.ts';
 import { eventTags, riskName, eventById } from './core/events.ts';
@@ -32,10 +33,11 @@ import { createSaveStore } from './persistence.ts';
 import { scoreText } from './score-view.ts';
 import { handExample, renderCatalog, renderDeck } from './reference.ts';
 import { runReview } from './run-review.ts';
+import { renderClub } from './club-view.ts';
 import { makeReport } from './core/run-summary.ts';
 import type { RunReport } from './core/run-summary.ts';
 import { drawReport, nativeShare, loadReport, saveReport, clearReport } from './share-card.ts';
-import { SPECIALS, specialById } from './core/special-cards.ts';
+import { SPECIALS, specialById, specialProgress } from './core/special-cards.ts';
 import { THRESHOLDS, thresholdValue, nextGap } from './core/thresholds.ts';
 import { drawOffer, offerLine, nextRerolls, OFFER_SIZE } from './core/draft.ts';
 import { LENGTHS, DEFAULT_NIGHTS, clampNights, lengthOf } from './core/lengths.ts';
@@ -52,6 +54,7 @@ import type { FeatureFlags } from './core/flags.ts';
 
 /** 设置页那一行的说明。写"这个功能让玩家多做了什么决定"，不写实现细节 */
 const FEATURE_BLURB: Record<keyof FeatureFlags, string> = {
+  club:'宾客委托与连锁故事：每夜选一份目标，让经营选择在之后的夜晚收到回信',
   thresholds: '回合目标：水位条上多几条线，决定这手是冲线拿奖励还是留强牌',
   bets: '加注：把抬注的档位与失手的罚则交给数据表，不再只有一档"输整场"',
   adjacency: '邻接共鸣：在铺子里用左右箭头换座，每次 £2，让同类客人相邻',
@@ -623,7 +626,7 @@ function syncCard(c: Card, node: HTMLElement): void {
   node.setAttribute('aria-label', `${RANK_LABEL(c.rank)}${SUIT_GLYPH[c.suit]}${c.enh !== 'none' ? `，${materialById(c.enh).name}` : ''}${c.seal !== 'none' ? `，${SEAL_NAME[c.seal]}` : ''}`);
   node.setAttribute('aria-pressed', String(chosen || target));
   const rare = specialById(c.special);
-  if (rare) { node.setAttribute('aria-label',`${node.getAttribute('aria-label')}，${rare.name}，${rare.blurb}`); node.title=rare.blurb; }
+  if (rare) { node.setAttribute('aria-label',`${node.getAttribute('aria-label')}，${rare.name}，${rare.blurb}，${specialProgress(c)}`); node.title=[rare.blurb,specialProgress(c)].filter(Boolean).join(' · '); }
   else node.removeAttribute('title');
   node.className = 'card'
     + (c.suit === 'h' || c.suit === 'd' ? ' red' : '')
@@ -632,7 +635,7 @@ function syncCard(c: Card, node: HTMLElement): void {
     + (c.special ? ` rare-${c.special}` : '')
     + (chosen ? ' chosen' : '')
     + (target ? ' target' : '');
-  const stamp = `${c.rank}${c.suit}${c.enh}${c.seal}${c.special??''}`;
+  const stamp = `${c.rank}${c.suit}${c.enh}${c.seal}${c.special??''}${c.charge??0}`;
   if (node.dataset.built !== stamp) {
     node.dataset.built = stamp;
     node.textContent = '';
@@ -687,7 +690,7 @@ function syncCard(c: Card, node: HTMLElement): void {
       node.append(seal);
     }
     if (rare) {
-      const badge=el('span','rare-badge');badge.textContent=`${rare.glyph} ${rare.name}`;badge.style.setProperty('--rare-color',rare.color);node.append(badge);
+      const badge=el('span','rare-badge');badge.textContent=`${rare.glyph} ${rare.name}${specialProgress(c)?` ${c.charge??0}/${c.special==='bond'?3:4}`:''}`;badge.style.setProperty('--rare-color',rare.color);node.append(badge);
     }
   }
 }
@@ -1246,6 +1249,10 @@ function refreshTutorial(): void {
 }
 
 function renderAll(): void {
+  const clubButton=need<HTMLButtonElement>('#btnClub');clubButton.hidden=!g.state.flags.club;
+  const ready=g.state.club?.contract?.status==='ready';
+  clubButton.textContent=ready?'委托 · 领奖':storyChapter(g.state)?'委托 · 来信':'委托簿';
+  clubButton.classList.toggle('club-alert',ready||!!storyChapter(g.state));
   renderMarquee();
   renderPatrons();
   renderTray();
@@ -1256,6 +1263,7 @@ function renderAll(): void {
   refreshTutorial();
   // 待决事件也是牌桌状态的一部分：它挂在 state 上，投影就该在这里跟着一变
   renderEventPick();
+  if(need('#club').classList.contains('open'))renderClubPanel();
   if (need('#codex').classList.contains('open')) {
     if (codexTab === 'deck') {
       const filters = ['deckZone', 'deckSuit', 'deckSort'].map((id) => [id, need<HTMLSelectElement>(`#${id}`).value]);
@@ -1420,7 +1428,7 @@ function requestSkip(): void {
   for (const a of liveAnims) { try { a.finish(); } catch { /* 已经结束了 */ } }
 }
 
-async function runTimeline(res: ScoreResult, played: Card[]): Promise<void> {
+async function runTimeline(res: ScoreResult, played: Card[], activeGame=g): Promise<void> {
   const landed = flyToTable(played);
   let cardIdx = 0;
   // 连锁第几档：流水/倍注的音效按它往上爬，一路"叮叮叮"越叮越高，
@@ -1428,8 +1436,10 @@ async function runTimeline(res: ScoreResult, played: Card[]): Promise<void> {
   let chainStep = 0;
   // 牌还没落定就先不出数字：让观众先看清"打出去的是哪几张"
   await landed;
+  if(g!==activeGame)return;
 
   for (const ev of res.events as ScoreEvent[]) {
+    if(g!==activeGame)return;
     if (ff) break;
     switch (ev.t) {
       case 'hand': {
@@ -1475,6 +1485,7 @@ async function runTimeline(res: ScoreResult, played: Card[]): Promise<void> {
           setTimeout(() => node.classList.remove(cls), Math.round(620 / speedMul));
         }
         await wait(190);
+        if(g!==activeGame)return;
         if (ev.addChips) { chipsReel.set(ev.after.chips); bump('chips'); sfx.play('chips', chainStep); }
         if (ev.addMult) { multReel.set(ev.after.mult); bump('mult'); sfx.play('mult', chainStep); }
         if (ev.xmult !== 1) { multReel.set(ev.after.mult); bump('mult'); sfx.play('xmult', chainStep); }
@@ -1526,14 +1537,16 @@ async function runTimeline(res: ScoreResult, played: Card[]): Promise<void> {
 
   // 跳过演出：读数直接跳到终值。事件流里每条都自带 after 快照，
   // 所以"补完"不需要重算一遍——这正是 ADR-0002 那条架构白送的能力
-  if (ff) { applyEventsSync(res, played, -1); ff = false; }
+  if(g!==activeGame)return;
+  if (ff) { applyEventsSync(res, played, -1, false); ff = false; }
 
   renderScoreline();
-  await afterScore(res);
+  await afterScore(res,activeGame);
 }
 
 /** 一手的收尾：过关就开铺子，打完还没够就散场。动画路径和抓帧路径共用这一段 */
-async function afterScore(res: ScoreResult): Promise<void> {
+async function afterScore(res: ScoreResult, activeGame=g): Promise<void> {
+  if(g!==activeGame)return;
   const target = targetOf(g.state);
   const mag = res.value / Math.max(1, target);
   renderScoreline();
@@ -1543,10 +1556,12 @@ async function afterScore(res: ScoreResult): Promise<void> {
 
   if (g.state.status === 'cleared') {
     await wait(200);
+    if(g!==activeGame)return;
     need('.felt', need('#board')).classList.add('cleared');
     sfx.play('seal');
     sfx.play('clear');
     await wait(850);
+    if(g!==activeGame)return;
     // 结清幕：把这一场的进账一条条念完再进铺子。钱不是凭空多出来的
     await showCurtain({
       kicker: '本场结清',
@@ -1555,6 +1570,7 @@ async function afterScore(res: ScoreResult): Promise<void> {
       lines: g.state.settlement.map((l) => ({ label: l.label, amount: l.amount })),
       sum: '1',
     });
+    if(g!==activeGame)return;
     const gained = g.state.settlement.reduce((a, l) => a + l.amount, 0);
     g.openShop();
     setBusy(false);
@@ -1566,6 +1582,7 @@ async function afterScore(res: ScoreResult): Promise<void> {
   } else if (g.state.status === 'lost') {
     sfx.play('fail');
     await wait(520);
+    if(g!==activeGame)return;
     setBusy(false);
     STORE.del();
     refreshResume();
@@ -1577,7 +1594,7 @@ async function afterScore(res: ScoreResult): Promise<void> {
 }
 
 /** 抓帧路径：把前 n 个事件一次性落成视觉状态，不依赖任何计时器 */
-function applyEventsSync(res: ScoreResult, played: Card[], n: number): void {
+function applyEventsSync(res: ScoreResult, played: Card[], n: number, finish=true): void {
   place(need('#tableCards'), played);
   need('#readout').classList.remove('idle');
   const upto = n < 0 ? res.events.length : Math.min(n, res.events.length);
@@ -1622,7 +1639,7 @@ function applyEventsSync(res: ScoreResult, played: Card[], n: number): void {
     totalReel.set(ev.after.value);
     lastTotal = ev.after.value;
   }
-  if (upto >= res.events.length) void afterScore(res);
+  if (finish && upto >= res.events.length) void afterScore(res);
 }
 
 function bump(which: 'chips' | 'mult' | 'total'): void {
@@ -1696,7 +1713,8 @@ function flare(mag: number): void {
 const STORE = createSaveStore(() => localStorage);
 function saveNow(): void {
   const ended = g.state.status === 'won' || g.state.status === 'lost';
-  const saved = ended ? STORE.del() : STORE.set(dumpSave(g));
+  const reportSaved=!ended||saveReport(makeReport(g.state,g.state.status==='won',new Date().toLocaleDateString('sv-SE')));
+  const saved = ended&&reportSaved ? STORE.del() : STORE.set(dumpSave(g));
   const note = need('#saveStatus');
   note.textContent = saved ? '' : '进度暂未保存，请保留窗口并重试';
   note.classList.toggle('failed', !saved);
@@ -1915,7 +1933,7 @@ function renderCodex(): void {
   }
   body.append(tabs);
   if (codexTab==='rare') {
-    const intro=el('p','reference-note');intro.textContent='在开局页启用「夜间奇遇」，有机会选择稀奇牌事件。牌性可与强化、蜡封同时存在，只在本张参与计分时触发。';body.append(intro);
+    const intro=el('p','reference-note');intro.textContent='基础六种稀奇牌来自「夜间奇遇」事件；新增八种可通过「经营奇遇」的委托奖励与故事获得。牌性与强化、蜡封并存；收藏留手成长、拾遗弃牌蓄力，其余按牌面条件触发。';body.append(intro);
     for (const card of SPECIALS) {const entry=el('article','catalog-entry rare-entry');const h=el('h3');h.textContent=`${card.glyph} ${card.name}`;const p=el('p');p.textContent=card.blurb;entry.append(h,p);body.append(entry);}return;
   }
   if (codexTab === 'deck') { renderDeck(body, g.state); return; }
@@ -1959,23 +1977,36 @@ function renderCodex(): void {
 }
 
 // ── 侧页 ─────────────────────────────────────────────────────
-type Panel = 'shop' | 'ledger' | 'codex' | 'settings';
+type Panel = 'shop' | 'ledger' | 'codex' | 'settings' | 'club';
+const PANELS:Panel[]=['shop','ledger','codex','settings','club'];
+let panelFocus:HTMLElement|null=null;
+function renderClubPanel():void {
+  const activeGame=g;
+  const change=(fn:()=>boolean):void=>{if(busy||g!==activeGame)return;if(fn()){renderAll();if(g.state.status==='shop')renderShop();saveNow();}};
+  renderClub(g,need('#clubBody'),{busy,accept:id=>change(()=>acceptCommission(g,id)),skip:()=>change(()=>skipCommission(g)),claim:id=>change(()=>claimCommission(g,id)),story:id=>change(()=>chooseStory(g,id))});
+}
 function openPanel(which: Panel): void {
-  for (const p of ['shop', 'ledger', 'codex', 'settings'] as Panel[]) {
+  if(which==='shop'&&g.state.status!=='shop')return;
+  panelFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
+  for (const p of PANELS) {
+    need(`#${p}`).inert=p!==which;
     if (p !== which) need(`#${p}`).classList.remove('open');
   }
   if (which === 'shop') renderShop();
   else if (which === 'ledger') renderLedger();
   else if (which === 'codex') renderCodex();
+  else if(which==='club')renderClubPanel();
   else renderSettings();
   need(`#${which}`).classList.add('open');
+  need<HTMLButtonElement>('button',need(`#${which}`)).focus();
   if (which === 'codex' && coach) { coach.classList.add('hidden'); delete coach.dataset.step; delete coach.dataset.kind; }
   // 铺子里那两个锚点（请客/抬注）只有面板开着才量得到；等一帧让布局落定再重贴
   setTimeout(() => refreshTutorial(), 0);
 }
 function closePanels(): void {
   const wasCodex = need('#codex').classList.contains('open');
-  for (const p of ['shop', 'ledger', 'codex', 'settings'] as Panel[]) need(`#${p}`).classList.remove('open');
+  for (const p of PANELS){need(`#${p}`).classList.remove('open');need(`#${p}`).inert=true;}
+  if(panelFocus?.isConnected)panelFocus.focus();panelFocus=null;
   if (wasCodex) refreshTutorial();
 }
 window.addEventListener('resize', () => refreshTutorial());
@@ -2038,7 +2069,7 @@ function renderShop(): void {
     const de = el('div', 'de');
     de.textContent = desc;
     n.append(top, rl, de);
-    const full = (slot.kind === 'patron' && seatedCount(g.state) >= lim.seats)
+    const full = (slot.kind === 'patron' && slot.edition!=='negative' && seatedCount(g.state) >= lim.seats)
       || (slot.kind === 'consumable' && g.state.consumables.length >= lim.slots);
     const cant = slot.sold || g.state.money < slot.price || full;
     if (slot.sold) n.classList.add('sold');
@@ -2159,19 +2190,25 @@ function renderShop(): void {
   const last = g.state.stage === 2 && g.state.night >= g.state.nights && !g.state.endless;
   const lv2 = el('button', 'brass-btn big leave');
   lv2.textContent = last ? '散 局' : '入下一场';
+  const rewardDue=g.state.flags.club&&g.state.club?.contract?.status==='ready';
+  (lv2 as HTMLButtonElement).disabled=!!rewardDue;lv2.title=rewardDue?'请打开委托簿，先选择这次委托的奖励':'';
+  if(rewardDue){const claim=el('button','brass-btn club-alert');claim.textContent='委托已达成 · 前往领奖';claim.addEventListener('click',()=>openPanel('club'));body.append(claim);}
   lv2.addEventListener('click', async () => {
-    if (busy) return;
+    if (busy||g.state.status!=='shop') return;
+    const activeGame=g,night=g.state.night;
     closePanels();
     g.next();
     if (g.state.status === 'won') { showEnd(true); STORE.del(); refreshResume(); return; }
     resetTable();
     renderAll();
     saveNow();
+    if(g.state.flags.club&&g.state.night!==night)openPanel('club');
     if (STAGE_KIND[g.state.stage] === 'boss') {
       // 贵客进门：不请自来，这一场不能跳过
       setBusy(true);
       sfx.play('boss');
       await showCurtain({ kicker: '不速之客', title: stakeLabel(g.state), blurb: stakeBlurb(g.state) });
+      if(g!==activeGame)return;
       setBusy(false);
       renderAll();
     } else {
@@ -2430,13 +2467,14 @@ function showEnd(won: boolean): void {
   const tips = el('ul');
   for (const text of review.tips) { const li = el('li'); li.textContent = text; tips.append(li); }
   reviewBox.append(result, resources, context, tips);
+  if(lastReport.story){const clubResult=el('p','club-ending');clubResult.textContent=`委托履约 ${lastReport.completedContracts??0} 份 · ${lastReport.story}`;reviewBox.append(clubResult);}
   if (lastChain) {
     const detail = el('details', 'hand-detail');
     const label = el('summary'); label.textContent = '最后一手怎么计分';
     const trace = el('pre', 'score-trace'); trace.textContent = scoreText(lastChain, cardNameOf);
     detail.append(label, trace); reviewBox.append(detail);
   }
-  need('#btnEndless').hidden = !won;
+  need('#btnEndless').hidden = !won||g.state.mode==='daily';
   // 「事件回顾」：整局递过的事件按夜列一遍，右边那行是当时**实际**发生了什么
   // （抛硬币那类只有执行完才知道朝哪面）。数据全在 state.events，这里只做投影。
   const box = need('#endRecapBox');
@@ -2513,6 +2551,8 @@ function pickNote(): void {
 }
 
 function renderPickers(): void {
+  const club=need<HTMLButtonElement>('#btnClubPreset');club.disabled=dailyLocked();club.setAttribute('aria-pressed',String(!dailyLocked()&&prefs.flags.club));
+  club.textContent=dailyLocked()?'每日牌局使用固定规则':prefs.flags.club?'经营奇遇已开启 · 委托、故事与新客人':'经营奇遇 · 委托、故事与新客人';
   const events=need<HTMLButtonElement>('#btnEventsToggle');events.disabled=dailyLocked();events.setAttribute('aria-pressed',String(!dailyLocked()&&prefs.flags.events));
   events.textContent=dailyLocked()?'每日牌局使用固定规则':prefs.flags.events?'夜间奇遇已开启 · 事件中可遇见稀奇牌':'开启夜间奇遇 · 事件中可遇见稀奇牌';
   // 牌组那一排随局长变：别的档的专属牌组不许摆在这里——内核会把它落回标准局，
@@ -2766,6 +2806,7 @@ function openFan(id: string): boolean {
  * 扇面留在屏幕上演完那半圈翻面，演完才重画这一屏。
  */
 function drawFromFan(cardId: number): void {
+  const activeGame=g;
   if (fanFrom === null || busy) return;
   const from = fanFrom;
   fanFrom = null;                      // 先摘这一格：再点第二张也不许二次落账
@@ -2778,19 +2819,23 @@ function drawFromFan(cardId: number): void {
   const row = need('#fanRow');
   row.classList.add('locked');
   if (hit) hit.node.classList.add('drawn');
-  if (SNAP) { renderAll(); return; }   // 无头档没有动画时钟： setTimeout 是冻结的，直接落到位
+  if (SNAP) { renderAll();finishEventTransition(); return; }
   setBusy(true);
   const flip = Math.round(230 / speedMul);
   const done = Math.round(460 / speedMul);
   if (hit) {
     hit.node.style.animation = `cardTurn ${done}ms var(--ease-settle)`;
     // 转到侧面那一瞬才换成正面：先看见牌背走开，再看见自己抽的这张立起来
-    setTimeout(() => { syncCard(hit.card, hit.node); }, flip);
+    setTimeout(() => { if(g===activeGame)syncCard(hit.card, hit.node); }, flip);
   }
-  setTimeout(() => { closeFan(); renderAll(); setBusy(false); }, done);
+  setTimeout(() => { if(g!==activeGame)return;closeFan(); renderAll(); setBusy(false);finishEventTransition(); }, done);
 }
 
 /** 选一条下去。内核认不下这个 id 就什么都不做（存档是外部输入，不能信它给的 id） */
+function finishEventTransition():void {
+  if(g.state.status==='cleared'){g.openShop();renderAll();renderShop();openPanel('shop');saveNow();}
+  else if(g.state.status==='lost'){setBusy(false);saveNow();showEnd(false);}
+}
 function takeEvent(id: string): void {
   if (openFan(id)) { sfx.play('deal'); return; }   // 要挑一张牌：先翻过去打乱，等玩家抽
   const line = chooseEvent(g, id);
@@ -2799,9 +2844,16 @@ function takeEvent(id: string): void {
   renderAll();
   saveNow();
   toast(line);
+  finishEventTransition();
 }
 
+function cancelPresentation():void {
+  dismissCurtain();
+  for(const a of liveAnims)a.cancel();liveAnims.clear();ff=false;
+  closeShare();closePanels();closeFan();
+}
 function start(seed: number, deckId = pickedDeck, over?: { diff?: Diff; mode?: Mode; flags?: FeatureFlags; nights?: number }): void {
+  cancelPresentation();
   // 偏好里的开关在**开局这一刻**被抄进 state.flags，之后这一局就用那份快照。
   // 中途去设置里翻开关不会搅了正在打的账——存档里带着 flags 就是为了这个。
   // over 只有引导关那一处在用：它要锁死难度、模式，并且强行关掉随机事件（见 guideFlags）。
@@ -2828,11 +2880,11 @@ function start(seed: number, deckId = pickedDeck, over?: { diff?: Diff; mode?: M
   need('#endcard').classList.add('hidden');
   need('#sharecard').classList.add('hidden');exportRequest=0;reportCanvas=null;
   closePanels();
-  closeFan();          // 换局时扇面还摊着的话，那一排扣过来的牌是上一局的
   renderAll();
   saveNow();
   toast(`第 1 夜 · 便宴 · 彩头 ${num(targetOf(g.state))}`);
   sfx.play('deal');
+  if(g.state.flags.club)openPanel('club');
 }
 
 /**
@@ -2859,6 +2911,12 @@ function startGuide(): void {
 // ── 按钮与键盘 ───────────────────────────────────────────────
 need('#btnStart').addEventListener('click', () => start(runSeed()));
 need('#btnEventsToggle').addEventListener('click',()=>{if(dailyLocked())return;prefs.flags.events=!prefs.flags.events;applyPrefs();renderPickers();});
+need('#btnClubPreset').addEventListener('click',()=>{
+  if(dailyLocked())return;
+  prefs.flags={...FLAGS_OFF,...(!prefs.flags.club?{club:true,events:true,sets:true,growth:true,adjacency:true,layers:true}:{})};
+  applyPrefs();renderPickers();
+});
+need('#btnClub').addEventListener('click',()=>openPanel('club'));
 need('#btnShareRun').addEventListener('click',()=>{if(lastReport)showShare(lastReport);});
 need('#btnLastReport').addEventListener('click',()=>{const report=lastReport??loadReport();if(report)showShare(report);else toast('还没有上一局战报');});
 need('#btnExportReport').addEventListener('click',()=>performShare('export'));
@@ -2879,6 +2937,7 @@ need('#btnEventAuto').addEventListener('click', () => {
   renderAll();
   saveNow();
   toast(`牌局自决 · ${line}`);
+  finishEventTransition();
 });
 // 「先不抽」：把扇面收掉，回到三选一。事件还挂着待决，什么都不落地
 need('#btnFanCancel').addEventListener('click', () => {
@@ -2910,6 +2969,7 @@ need('#btnResume').addEventListener('click', () => {
   const t = STORE.get();
   const loaded = t ? loadSave(t) : null;
   if (!loaded) { need('#resumeNote').textContent = '那份存档读不出来了'; return; }
+  cancelPresentation();
   g = loaded;
   const recovered = STORE.recovered;
   seenSets = null;
@@ -2942,12 +3002,14 @@ function paintSoundBtn(): void {
 }
 // 散场后默认换一个种子；想原样重打同一局，回到标题页手动填回旧种子
 need('#btnAgain').addEventListener('click', () => {
+  if(need('#endcard').classList.contains('hidden')||!['won','lost'].includes(g.state.status))return;
   // 每日一局"再来一局"还是今天这一局（要换就得明天）；其余模式换一个新种子
   const next = dailyLocked() ? dailySeed() : 1000 + Math.floor(Math.random() * 899900);
   need<HTMLInputElement>('#seedInput').value = String(next);
   start(next);
 });
 need('#btnEndless').addEventListener('click', () => {
+  if(need('#endcard').classList.contains('hidden')||g.state.mode==='daily'||g.state.status!=='won')return;
   need('#endcard').classList.add('hidden');
   continueEndless(g);
   saveNow();

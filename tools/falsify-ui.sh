@@ -27,6 +27,14 @@ trap 'restore; rm -rf "$BAK"' EXIT
 
 # ||| 分隔：文件 原样 改成 说明
 INJ=(
+  "web/main.ts|||accept:id=>change(()=>acceptCommission(g,id))|||accept:id=>{}|||经营奇遇：接单按钮未调用内核"
+  "web/main.ts|||claim:id=>change(()=>claimCommission(g,id))|||claim:id=>{}|||经营奇遇：领奖按钮未调用内核"
+  "web/main.ts|||story:id=>change(()=>chooseStory(g,id))|||story:id=>{}|||经营奇遇：故事选择未调用内核"
+  "web/club-view.ts|||if(r.status==='ready'){|||if(false){|||经营奇遇：达成后没有奖励选择"
+  "web/main.ts|||{club:true,events:true,sets:true|||{club:false,events:true,sets:true|||经营奇遇：预设未开启委托故事"
+  "web/main.ts|||if(need('#endcard').classList.contains('hidden')||!['won','lost'].includes(g.state.status))return;|||void 0;|||经营奇遇：隐藏的再来一局仍生效"
+  "web/main.ts|||    await wait(520);\n    if(g!==activeGame)return;|||    await wait(520);|||跨局败局：旧局回调删除新局进度"
+  "web/main.ts|||function cancelPresentation():void {\n  dismissCurtain();|||function cancelPresentation():void {|||跨局幕卡：开新局未取消旧幕布"
   "web/main.ts|||need('#sharecard').classList.remove('hidden');need<HTMLButtonElement>('#btnExportReport').focus();|||need('#sharecard').classList.remove('hidden');|||分享新牌：打开分享不聚焦保存"
   "web/main.ts|||  saveReport(lastReport);|||  void 0;|||分享新牌：上一局战报不持久化"
   "web/share-card.ts|||canvas.width=1200;canvas.height=1740|||canvas.width=600;canvas.height=1740|||分享新牌：导出分辨率缩水"
@@ -41,7 +49,7 @@ INJ=(
   "web/reference.ts|||b.card.rank - a.card.rank|||a.card.rank - b.card.rank|||查阅与复盘：点数排序方向错误"
   "web/reference.ts|||  const cards = exampleCards(kind), scoring = evaluate(cards).scoring;|||  const cards = exampleCards(kind), scoring = cards;|||查阅与复盘：陪牌被标为参与计分"
   "web/main.ts|||    if (seen) d.append(handExample(k));|||    d.append(handExample(k));|||查阅与复盘：未发现的隐秘示例提前泄露"
-  "web/run-review.ts|||  const best = Math.max(s.score, 0, ...s.ledger.map((r) => r.best));|||  const best = Math.max(0, ...s.ledger.map((r) => r.best));|||查阅与复盘：最高流水遗漏失败当前场"
+  "web/run-review.ts|||  const best = Math.max(s.score, s.runStats.bestStage ?? 0, 0, ...s.ledger.map((r) => r.best));|||  const best = Math.max(0, ...s.ledger.map((r) => r.best));|||查阅与复盘：最高流水遗漏失败当前场"
   "web/run-review.ts|||  const gap = Math.max(0, target - score);|||  const gap = 0;|||查阅与复盘：失败差额被清零"
   "web/styles.css|||#title .deed, #guideIntro .deed { display: flex; flex-direction: column; overflow: hidden; padding: 0; }|||#title .deed, #guideIntro .deed { display: block; overflow: auto; padding: 0; }|||查阅与复盘：展开开局选项挤走入席按钮"
   "web/main.ts|||  saveNow();            // 内核已入账，动画中退出也应恢复到这一步|||  void 0;|||可靠性：普通出牌不立即存档"
@@ -62,7 +70,7 @@ INJ=(
   "web/main.ts|||    if (ff) break;|||    if (false) break;|||按了跳过，级联照旧一条条演完"
   "web/main.ts|||    if (busy) { requestSkip(); return; }|||    if (busy) { return; }|||演出中按空格什么也不做（键盘玩家没有跳过）"
   "web/main.ts|||need('#board').addEventListener('click', () => requestSkip());|||need('#board').addEventListener('click', () => { void 0; });|||演出中点牌桌不能跳过（鼠标玩家没有跳过）"
-  "web/main.ts|||  if (ff) { applyEventsSync(res, played, -1); ff = false; }|||  if (ff) { ff = false; }|||跳过之后读数停在半路，和内核记的账对不上"
+  "web/main.ts|||  if (ff) { applyEventsSync(res, played, -1, false); ff = false; }|||  if (ff) { ff = false; }|||跳过之后读数停在半路，和内核记的账对不上"
   "web/main.ts|||  if (!busy) return;\n  ff = true;|||  ff = true;|||没在演出时也置跳过标记，下一手被无声吃掉"
   "web/main.ts|||if (!alive.has(id)) { n.remove(); cardEls.delete(id); }|||if (!alive.has(id)) n.remove();|||打过的牌永远挂在 cardEls 上（连 click 闭包一起）"
   "web/main.ts|||      if (lp) drop(lp);|||Ø|||中提琴那声的低通没从音频图上摘下来，越放越重"
@@ -134,9 +142,9 @@ INJ=(
   "web/main.ts|||    n.dataset.card = String(c.id);|||Ø|||扇面上的每张对不上内核给的候选（判据量不到\"抽谁落谁\"）"
   "web/main.ts|||  need('#drawFan').classList.remove('hidden');|||  void 0;|||扇面摆出来了却始终看不见（看不见的一排等于没有仪式）"
   "web/main.ts|||  const line = chooseEvent(g, from, cardId);|||  const line = chooseEvent(g, from);|||抽来的那张没交给内核：落哪张还是摇出来的，抽牌是假的"
-  "web/main.ts|||    setTimeout(() => { syncCard(hit.card, hit.node); }, flip);|||    void 0;|||抽的那张不翻开：玩家看不见自己抽到了什么"
-  "web/main.ts|||  setTimeout(() => { closeFan(); renderAll(); setBusy(false); }, done);|||  void 0;|||翻面演完扇面不收、busy 不落下（牌局被按着头停在原地）"
-  "web/main.ts|||  closeFan();          // 换局时|||  void 0;          // 换局时|||换一局上一排牌背还摊着"
+  "web/main.ts|||    setTimeout(() => { if(g===activeGame)syncCard(hit.card, hit.node); }, flip);|||    void 0;|||抽的那张不翻开：玩家看不见自己抽到了什么"
+  "web/main.ts|||  setTimeout(() => { if(g!==activeGame)return;closeFan(); renderAll(); setBusy(false);finishEventTransition(); }, done);|||  void 0;|||翻面演完扇面不收、busy 不落下（牌局被按着头停在原地）"
+  "web/main.ts|||  if (box) box.classList.add('hidden');|||  void box;|||抽牌礼清理失效：旧牌背不再隐藏"
   # ── 局长（3～15 夜）：标题页那一排、真正跑起来的夜数、随局长的文案 ───
   "web/main.ts|||    nights: over?.nights ?? nightsForRun(),|||    nights: over?.nights ?? DEFAULT_NIGHTS,|||标题页选的轮数没传进内核：整局还是八夜（散场卡与牌桌读数跟着一起说谎）"
   "web/main.ts|||const nightsForRun = (): number => (dailyLocked() ? DEFAULT_NIGHTS : prefs.nights);|||const nightsForRun = (): number => prefs.nights;|||每日一局跟着偏好里的轮数走，「同一天同一局」在界面上就破了"
@@ -205,6 +213,9 @@ fi
 # 先跑最直接的具名判据。没抓到时必定回退全套，避免分类错误变成漏测。
 focus_modes() {
   case "$1" in
+    *经营奇遇*) echo '经营奇遇';;
+    *跨局败局*) echo '跨局败局回调';;
+    *跨局幕卡*) echo '跨局幕卡回调';;
     *分享新牌*) echo '分享';;
     *查阅与复盘*) echo '查阅与复盘';;
     *可靠性*) echo '可靠性';;

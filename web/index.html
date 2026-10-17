@@ -26,6 +26,7 @@
       </div>
       <button class="brass-btn" id="btnCodex" title="牌型图鉴 (K)">图鉴</button>
       <button class="brass-btn" id="btnDeck" title="查看本局完整牌组">牌组</button>
+      <button class="brass-btn" id="btnClub" hidden title="本夜委托与连锁故事">委托簿</button>
       <button class="brass-btn" id="btnLedger" title="账本 (L)">账本</button>
       <button class="brass-btn" id="btnShop" title="铺子 (S)">铺子</button>
       <button class="brass-btn icon" id="btnSound" title="静音 (M)">♪</button>
@@ -96,6 +97,11 @@
   <div class="panel-body" id="ledgerBody"></div>
 </div>
 
+<div id="club" class="panel" inert>
+  <div class="panel-head"><h2>委 托 与 来 信</h2><button class="close" data-close="club" aria-label="关闭委托簿">✕</button></div>
+  <div class="panel-body" id="clubBody"></div>
+</div>
+
 <div id="curtain" class="overlay curtain hidden">
   <div class="curtain-inner">
     <div class="crest big" aria-hidden="true"></div>
@@ -117,6 +123,7 @@
     <div class="pickrow"><span class="lbl2">玩法</span><div class="pickers" id="modes"></div></div>
     <p class="picknote" id="pickNote"></p>
     <button class="journey-switch" id="btnEventsToggle" aria-pressed="false">夜间奇遇 · 遇见稀奇牌</button>
+    <button class="journey-switch club-preset" id="btnClubPreset" aria-pressed="false">经营奇遇 · 委托、故事与新客人</button>
     <details class="rules-fold" id="startOptions">
     <summary>自定牌局 · 难度、轮数、牌组与种子</summary>
     <div class="seedrow" id="seedRow">

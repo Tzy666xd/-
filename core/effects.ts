@@ -133,6 +133,8 @@ export interface PatronCtx {
   night?: number;
   /** 本场彩头 */
   target?: number;
+  contractsDone?:number;
+  contractsTonight?:number;
   /**
    * 吃概率的效果用这个摇，**不要自己造随机数**。
    * 它走内核那一条种子流，所以同一 seed 同一 calls 摇出的结果一定一样，
@@ -142,6 +144,7 @@ export interface PatronCtx {
 }
 
 export interface PatronDef {
+  clubOnly?:boolean;
   id: string;
   name: string;
   role: string;           // 一行身份，画在肖像框下面

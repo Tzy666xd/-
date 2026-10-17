@@ -23,22 +23,24 @@ export interface FeatureFlags {
   draft: boolean;
   /** 随机事件：每夜递一次三选一，选下去的几条挂着改规矩、计分与牌组 */
   events: boolean;
+  /** 经营奇遇：宾客委托与跨夜故事 */
+  club: boolean;
 }
 
 export const FLAG_KEYS: (keyof FeatureFlags)[] = [
-  'thresholds', 'bets', 'adjacency', 'sets', 'growth', 'layers', 'discardOps', 'draft', 'events',
+  'thresholds', 'bets', 'adjacency', 'sets', 'growth', 'layers', 'discardOps', 'draft', 'events', 'club',
 ];
 
 /** 默认全关：新功能不批准进主线就不该影响任何一局 */
 export const FLAGS_OFF: FeatureFlags = {
   thresholds: false, bets: false, adjacency: false, sets: false,
-  growth: false, layers: false, discardOps: false, draft: false, events: false,
+  growth: false, layers: false, discardOps: false, draft: false, events: false, club:false,
 };
 
 /** 全开：给试玩、模拟器和自检当"实验台"用 */
 export const FLAGS_ALL: FeatureFlags = {
   thresholds: true, bets: true, adjacency: true, sets: true,
-  growth: true, layers: true, discardOps: true, draft: true, events: true,
+  growth: true, layers: true, discardOps: true, draft: true, events: true, club:true,
 };
 
 export const FLAG_LABEL: Record<keyof FeatureFlags, string> = {
@@ -51,6 +53,7 @@ export const FLAG_LABEL: Record<keyof FeatureFlags, string> = {
   discardOps: '弃牌堆可翻',
   draft: '开局选签名宾',
   events: '随机事件',
+  club: '宾客委托与连锁故事',
 };
 
 /** 只认白名单里的键，其余丢掉：存档里的 flags 属于外部输入 */

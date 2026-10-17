@@ -279,11 +279,31 @@ export const PATRONS: PatronDef[] = [
   },
 ];
 
+PATRONS.push(
+  {id:'solicitor',name:'契约律师',role:'每个承诺都记在案',monogram:'CT',clubOnly:true,
+    rarity:'uncommon',cost:7,kind:'mult',hook:'independent',temperament:'head',
+    blurb:'每份已领取奖励的委托 +2 倍注，最多 +12',
+    apply:c=>(c.contractsDone??0)>0?{mult:Math.min(12,2*(c.contractsDone??0)),note:'履约'}:null},
+  {id:'archivist',name:'修复师艾达',role:'折角也是故事',monogram:'AD',clubOnly:true,
+    rarity:'common',cost:5,kind:'chips',hook:'onCard',temperament:'head',
+    blurb:'每张计分牌每层蓄力 +8 流水，最多 +32（债券的兑现次数不算蓄力）',
+    apply:c=>c.card&&(c.card.special==='salvage'||c.card.special==='collector')&&(c.card.charge??0)>0?{chips:8*Math.min(4,c.card.charge??0),note:'修复'}:null},
+  {id:'courier',name:'午夜邮差',role:'让下一位接上来',monogram:'MP',clubOnly:true,
+    rarity:'common',cost:5,kind:'chips',hook:'onPlayed',temperament:'head',
+    blurb:'出牌中至少有两张相邻同花色的牌，+35 流水',
+    apply:c=>c.played.some((x,i)=>i>0&&x.suit===c.played[i-1].suit)?{chips:35,note:'接力'}:null},
+  {id:'sponsor',name:'灰手套赞助人',role:'守信就值得投资',monogram:'GS',clubOnly:true,
+    rarity:'uncommon',cost:7,kind:'economy',hook:'onRoundEnd',temperament:'head',
+    blurb:'本夜已领取过委托奖励，之后每场结清额外 £4',
+    apply:c=>(c.contractsTonight??0)>0?{money:4,note:'赞助'}:null},
+);
+
 // ── tag / 邻接共鸣 / 长进：三张附表按 id 挂到 PATRONS 上 ─────────
 // 为什么不直接把字段写进那 14 个对象：这张表要能被逐条 review 与批量调整
 // （"哪些人算一门"是内容决定，不是逻辑决定），而且新客人只要在这里加一行。
 // 挂完之后 PatronDef 上就是普通字段，结算侧读法与内联写法完全一样。
 const PATRON_TAGS: Record<string, string[]> = {
+  solicitor:['law','quill'],archivist:['nerd','quill'],courier:['trade','blood'],sponsor:['court','newmoney'],
   hobbs: ['law', 'nerd'],
   payne: ['trade', 'blood'],
   countess: ['court', 'nerd'],

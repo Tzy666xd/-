@@ -43,6 +43,15 @@ trap 'cleanup; rm -rf "$BAK"' EXIT
 
 # 文件 ||| 原样 ||| 改成 ||| 这条注入本该被哪类判据抓到
 INJ=(
+  "game.ts|||r.status!=='ready'|||r.status==='missing'|||经营奇遇：已领奖的委托重复付钱"
+  "game.ts|||c.completed++;s.rep++|||s.rep++|||经营奇遇：履约次数未入账"
+  "game.ts|||s.night>=r.due|||true|||经营奇遇：故事同夜连读下一章"
+  "save.ts|||decisions: s.decisions, club:s.club|||decisions: s.decisions|||经营奇遇：新存档漏掉委托故事"
+  "special-cards.ts|||if(index>0&&live[index-1].suit===c.suit)|||if(index>0)|||经营奇遇：接力不同花也触发"
+  "scoring.ts|||c.special==='bond'&&pass===0|||c.special==='bond'|||经营奇遇：债券重诵重复兑现"
+  "game.ts|||for(const c of s.hand)if(c.special==='collector')c.charge=Math.min(4,(c.charge??0)+1);|||for(const c of s.hand)if(c.special==='collector')c.charge=(c.charge??0)+1;|||经营奇遇：收藏蓄力无上限"
+  "game.ts|||for(const c of gone)if(c.special==='salvage')c.charge=Math.min(4,(c.charge??0)+1);|||for(const c of gone)if(c.special==='salvage')c.charge=(c.charge??0)+1;|||经营奇遇：拾遗蓄力无上限"
+  "scoring.ts|||contractsDone: input.scene?.contractsDone|||contractsDone: 0|||经营奇遇：律师读取不到履约数"
   "game.ts|||  s.runStats.bestStage = Math.max(s.runStats.bestStage, s.score);|||  s.runStats.bestStage = 0;|||分享新牌：重做抹掉整局最高流水"
   "special-cards.ts|||chips=12*Math.min(4,seats)|||chips=12*Math.min(3,seats)|||分享新牌：会客封顶错误"
   "special-cards.ts|||Math.floor(money)|||Math.ceil(money)|||分享新牌：账票碎银也算整镑"
@@ -91,7 +100,7 @@ INJ=(
   "draft.ts|||  if (pool.length <= OFFER_SIZE) return pool.slice();|||  if (pool.length <= OFFER_SIZE || rerolls > 0) return pool.slice(0, OFFER_SIZE);|||签名宾重掷不换人，换一批是假按钮"
   "draft.ts|||    left.splice(hit, 1);|||    void 0;|||签名宾候选允许同一个人出现两次"
   "draft.ts|||  return ensureMix(picked, pool, rand);|||  return picked;|||签名宾候选清一色同一种脾气，选路线变成假选择"
-  "draft.ts|||  return PATRONS.filter((p) => !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= rep);|||  return PATRONS.filter((p) => !owned.includes(p.id));|||签名宾无视声望门槛，传说开局就能白拿"
+  "draft.ts|||  return PATRONS.filter((p) => !p.clubOnly && !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= rep);|||  return PATRONS.filter((p) => !p.clubOnly && !owned.includes(p.id));|||签名宾无视声望门槛，传说开局就能白拿"
   "game.ts|||      const sig = PATRONS.find((x) => x.id === o.signature);|||      const sig = PATRONS.find((x) => x.id === o.signature) ?? PATRONS[0];|||签名宾认不出时凭空塞一位客人进局"
   "game.ts|||    if (s.flags.draft && o.signature) {|||    if (o.signature) {|||关掉开关签名宾照样入座，等于关不掉"
   "game.ts|||        s.seats.push(mkSeat(sig.id));|||        s.seats.push(mkSeat(sig.id)), this.rand.next();|||签名宾挤动了主随机流，老档快进会落到别的牌上"
@@ -240,9 +249,9 @@ INJ=(
   "game.ts|||    if (!m.eff) continue;\n    if (m.scope === 'hand' && (m.hands ?? 0) <= 0) continue;|||    if (!m.eff) continue;|||'下一手'那一格过完一手还在加分（到期后不该再进管道。锚点必须带上一行：limits() 里那条到期判断把它当子串包含）"
   "game.ts|||    const take = s.discardPile.splice(0, Math.min(op.n, s.discardPile.length));|||    const take = s.discardPile.splice(0, 0);|||弃牌堆收回牌堆变成假操作（数量守恒那条）"
   "events.ts|||export const eventAtFor = (r: Rand): number => 2 + r.int(2);|||export const eventAtFor = (r: Rand): number => 1 + r.int(1);|||触发点恒等于 1：开局第一手就弹，'摇在 2 或 3'那条判据要红"
-  "guide.ts|||export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f, events: false });|||export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f });|||教学局没关掉随机事件：十节课那局会被别的事打断"
+  "guide.ts|||export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f, events: false, club: false });|||export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f });|||教学局没关掉随机事件：十节课那局会被别的事打断"
   "save.ts|||    if (!isStr(r.from) || !isStr(r.scope) || !SCOPE_SET.has(r.scope) || !isInt(r.night, 1)) return false;|||    if (!isStr(r.from) || !isStr(r.scope) || !isInt(r.night, 1)) return false;|||作用域写成别的词也照收（'只认下一手/本夜/整局'那条）"
-  "save.ts|||      if (!Object.values(m as Record<string, unknown>).every(isNum)) return false;|||      if (false) return false;|||修正表里混进字符串也放过：limits 的累加会变成字符串拼接"
+  "save.ts|||allowed.includes(k)&&numericOk(k,v)|||allowed.includes(k)|||修正表里混进字符串也放过：limits 的累加会变成字符串拼接"
   # ── 逻辑 bug 探针照出来的那六处修复，每处一根钉子 ─────────────
   "scoring.ts|||    if (chips < 0) chips = 0;|||Ø|||事件把流水压成负数没人夹：一手牌做负分，累计流水倒退"
   "scoring.ts|||    if (mult < 1) mult = 1;|||Ø|||事件把倍注压到 1 以下：倍注变 0 甚至负数"

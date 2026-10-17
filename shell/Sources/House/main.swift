@@ -48,9 +48,9 @@ final class ResourceHandler: NSObject, WKURLSchemeHandler {
     let url = task.request.url ?? URL(string: "\(SCHEME)://local/index.html")!
     var rel = url.path
     if rel.isEmpty || rel == "/" { rel = "/index.html" }
-    let target = webRoot.appendingPathComponent(String(rel.dropFirst())).standardizedFileURL
+    let target = webRoot.appendingPathComponent(String(rel.dropFirst())).standardizedFileURL.resolvingSymlinksInPath()
     // 目录穿越防护：自定义 scheme 本身可读任意路径，必须圈在资源目录内
-    guard target.path.hasPrefix(webRoot.path), let data = try? Data(contentsOf: target) else {
+    guard url.scheme == SCHEME, url.host == "local", target.path.hasPrefix(webRoot.resolvingSymlinksInPath().path + "/"), let data = try? Data(contentsOf: target) else {
       log("资源未找到", target.path)
       respond(task, url: url, data: Data("404".utf8), mime: "text/plain", status: 404)
       return

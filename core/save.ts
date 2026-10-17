@@ -16,6 +16,7 @@ import { LESSON_IDS, MARKER } from './guide.ts';
 import { EVENT_IDS } from './events.ts';
 import { SPECIALS } from './special-cards.ts';
 import { newRunStats } from './run-record.ts';
+import { validClub, newClub } from './club.ts';
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = 'guinea.save.v1';
@@ -51,6 +52,7 @@ function cardOk(c: unknown): c is Card {
     && isStr(x.suit) && SUIT_SET.has(x.suit)
     && isStr(x.enh) && ENH_SET.has(x.enh)
     && isStr(x.seal) && SEAL_SET.has(x.seal)
+    && (x.charge === undefined || isInt(x.charge,0,4))
     && (x.special === undefined || (isStr(x.special) && SPECIALS.some((s)=>s.id===x.special)));
 }
 
@@ -66,9 +68,10 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   if (g.decisions !== undefined && (!isArr(g.decisions) || g.decisions.length > 120 || !g.decisions.every((d) => {
     if (typeof d !== 'object' || d === null) return false;
     const x = d as Record<string, unknown>;
-    return isStr(x.kind) && ['start','hire','sell','raise','event','item'].includes(x.kind)
+    return isStr(x.kind) && ['start','hire','sell','raise','event','item','contract','story'].includes(x.kind)
       && isInt(x.night,1,100000) && isInt(x.stage,0,2) && isInt(x.hand,0,99) && isStr(x.text) && x.text.length <= 240;
   }))) return null;
+  if (g.club !== undefined && g.club !== null && !validClub(g.club)) return null;
   if (g.runStats !== undefined) {
     if (typeof g.runStats !== 'object' || g.runStats === null || Array.isArray(g.runStats)) return null;
     const r = g.runStats as Record<string,unknown>;
@@ -92,9 +95,10 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
   if (!isNum(g.rep) || (g.rep as number) < 0) return null;
   if (!isNum(g.score) || (g.score as number) < 0) return null;
   for (const k of ['raiseNext', 'raisedHere', 'handsLeft', 'discardsLeft',
-    'handIndex', 'discardsUsed', 'rerolls'] as const) {
+    'handIndex', 'discardsUsed'] as const) {
     if (!isInt(g[k], 0, 99)) return null;
   }
+  if(!isInt(g.rerolls,0,Number.MAX_SAFE_INTEGER))return null;
   // 牌区必须是数组，且每张牌都合法——不能"缺了就当空"，那会让读档后拿到半个对象
   for (const k of ['deck', 'hand', 'table', 'discardPile'] as const) {
     if (!isArr(g[k]) || !(g[k] as unknown[]).every(cardOk)) return null;
@@ -217,7 +221,10 @@ export function validate(raw: unknown): { state: GameState; calls: number } | nu
       const m = r[key];
       if (m === undefined) continue;
       if (typeof m !== 'object' || m === null || Array.isArray(m)) return false;
-      if (!Object.values(m as Record<string, unknown>).every(isNum)) return false;
+      const allowed=key==='rule'?['seats','handSize','hands','discards','slots','interestCap','targetScale','freeRerolls','priceScale']:['chips','mult','xmult'];
+      const numericOk=(k:string,v:unknown):boolean=>['seats','handSize','hands','discards','slots','freeRerolls'].includes(k)
+        ? isInt(v,-20,20) : isNum(v)&&(['targetScale','priceScale','xmult'].includes(k)?(v as number)>0&&(v as number)<=10:Math.abs(v as number)<=10000);
+      if (!Object.entries(m).every(([k,v])=>allowed.includes(k)&&numericOk(k,v))) return false;
     }
     return true;
   }))) return null;
@@ -251,7 +258,7 @@ export function serialize(g: Game): string {
       signature: s.signature, tutorial: s.tutorial, guide: s.guide,
       eventAt: s.eventAt, nightActions: s.nightActions, pendingEvent: s.pendingEvent,
       events: s.events, eventMods: s.eventMods,
-      runStats: s.runStats, decisions: s.decisions,
+      runStats: s.runStats, decisions: s.decisions, club:s.club,
     },
   });
 }
@@ -266,7 +273,7 @@ const STATE_KEYS = [
   'shop', 'rerolls', 'ledger', 'discovered', 'settlement', 'endless', 'diff', 'mode', 'log',
   'flags', 'claimed', 'betReprieves', 'buffer', 'signature', 'tutorial', 'guide',
   'eventAt', 'nightActions', 'pendingEvent', 'events', 'eventMods', 'nights',
-  'runStats', 'decisions',
+  'runStats', 'decisions', 'club',
 ] as const;
 
 function assignWhitelisted(to: Record<string, unknown>, from: Record<string, unknown>): void {
@@ -292,6 +299,8 @@ export function deserialize(text: string): Game | null {
   // 缺 flags（新功能上线前存的档）就落在构造期的 FLAGS_OFF 上——新功能默认关，
   // 老档照样能读，而且不会读出"半个开关状态"。
   g.state.flags = sanitizeFlags(g.state.flags, FLAGS_OFF);
+  g.state.club = g.state.flags.club ? g.state.club ?? newClub(g.state.seed,g.state.night) : null;
+  if(g.state.books.royal!==undefined){g.state.books.sf=Math.max(g.state.books.sf??1,g.state.books.royal);delete g.state.books.royal;}
   // 签名宾只有一条守卫，而且必须只有这一条：非字符串已被 validate 拦掉，
   // 再叠一层 PID_SET 判同样的事，等于留一行永远测不到的死代码（falsify 会把它记成盲区）。
   // 语义上正确的判据是"档里确实坐着这位"——选了人但人不在座上就当作没选。

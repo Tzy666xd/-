@@ -79,7 +79,7 @@ export interface ScoreInput {
    */
   scene?: {
     handsLeft?: number; deckLeft?: number; discardCount?: number;
-    distinctKinds?: number; night?: number; target?: number;
+    distinctKinds?: number; night?: number; target?: number; contractsDone?:number;
   };
   /** 摇概率。必须由内核传进来，界面不许自己摇——否则演出重放会对不上账 */
   roll?: (p: number) => boolean;
@@ -139,7 +139,7 @@ export function score(input: ScoreInput): ScoreResult {
   const before = input.scoreBefore ?? 0;
   const ths = input.thresholds ?? [];
   const line = input.targetLine ?? 0;
-  const claimed = [...(input.claimed ?? [])];
+  const claimed = (input.claimed ?? []).filter(id => ths.find(d => d.id === id)?.span === 'stage');
   const fired: string[] = [];
 
   const snap = (): Snap => ({ chips, mult, value: chips * mult });
@@ -226,7 +226,8 @@ export function score(input: ScoreInput): ScoreResult {
     return null;
   };
   const live: Card[] = [];
-  for (const c of result.scoring) {
+  const scoringIds = new Set(result.scoring.map(c => c.id));
+  for (const c of played.filter(c => scoringIds.has(c.id))) {
     const why = blockedWhy(c);
     if (why) push({ t: 'blocked', id: c.id, why });
     else live.push(c);
@@ -248,6 +249,7 @@ export function score(input: ScoreInput): ScoreResult {
     distinctKinds: input.scene?.distinctKinds,
     night: input.scene?.night,
     target: input.scene?.target,
+    contractsDone: input.scene?.contractsDone,
     roll: input.roll,
   });
 
@@ -299,7 +301,8 @@ export function score(input: ScoreInput): ScoreResult {
         if (c.enh === 'glass') xmult *= 2;
         if (c.seal === 'blue') addChips += BLUE_SEAL_CHIPS * blueCount;
       }
-      const rare = specialEffect(c, live, held, env.money, roster.length, env.handIndex, i);
+      const rare = specialEffect(c, live, held, env.money, roster.length, env.handIndex, i, played.length, input.scene?.deckLeft);
+      if(c.special==='bond'&&pass===0&&(c.charge??0)<3){money+=2;rare.note+=' · 兑现 £2';}
       addChips += rare.chips; addMult += rare.mult; xmult *= rare.xmult;
       chips += addChips;
       mult += addMult;

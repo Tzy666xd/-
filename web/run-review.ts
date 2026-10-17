@@ -12,7 +12,7 @@ export function runReview(s: GameState, won: boolean): {
   const target = won && last ? last.target : targetOf(s);
   const score = won && last ? last.best : s.score;
   const gap = Math.max(0, target - score);
-  const best = Math.max(s.score, 0, ...s.ledger.map((r) => r.best));
+  const best = Math.max(s.score, s.runStats.bestStage ?? 0, 0, ...s.ledger.map((r) => r.best));
   const tips: string[] = [];
   if (!won) {
     if (s.discardsLeft > 0) tips.push(`散场时还剩 ${s.discardsLeft} 次弃牌。下一局在出牌用尽前，用弃牌寻找主攻牌型。`);

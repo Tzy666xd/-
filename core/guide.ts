@@ -353,7 +353,7 @@ export const GUIDE = {
  * 2. 事件会改限额与牌组，钉住的那颗种子就不再是第 9 节里演的那副牌了。
  * 界面开局时过一道这里，规则本身留在内核，自检才钉得住。
  */
-export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f, events: false });
+export const guideFlags = (f: FeatureFlags): FeatureFlags => ({ ...f, events: false, club: false });
 
 /** 开一局课：把标记位钉进 state。玩法不读它，界面只读它 */
 export const beginGuide = (s: GameState): void => { s.guide = [MARKER]; };

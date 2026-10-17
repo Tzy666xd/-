@@ -11,6 +11,10 @@ import { evaluate, HANDS, handBase } from './hands.ts';
 import { Rand } from './rng.ts';
 import { specialById } from './special-cards.ts';
 import { newRunStats } from './run-record.ts';
+import { newClub } from './club.ts';
+import type { ClubState } from './club.ts';
+import { contractOffer, contractById, contractValue, freshWork } from './contracts.ts';
+import { storyById } from './stories.ts';
 import type { RunStats, RunDecision, DecisionKind } from './run-record.ts';
 import { score } from './scoring.ts';
 import type { ScoreResult } from './scoring.ts';
@@ -124,6 +128,7 @@ export interface ShopSlot {
 }
 
 export interface GameState {
+  club: ClubState | null;
   runStats: RunStats;
   decisions: RunDecision[];
   seed: number;
@@ -223,19 +228,18 @@ export interface SettleLine {
   pid?: string;
 }
 
-let uid = 1;
-const newCard = (rank: number, suit: Suit): Card => ({ id: uid++, rank, suit, enh: 'none', seal: 'none' });
 
 export const mkSeat = (pid: string, edition: Edition = 'none'): Seat => ({ pid, edition });
 export const seatIds = (s: GameState): string[] => s.seats.map((x) => x.pid);
 
 export function freshDeck(rand: Rand): Card[] {
   const d: Card[] = [];
-  for (const s of SUITS) for (let r = 2; r <= 14; r++) d.push(newCard(r, s));
+  for (const s of SUITS) for (let r = 2; r <= 14; r++) d.push({id:d.length+1,rank:r,suit:s,enh:'none',seal:'none'});
   return rand.shuffle(d);
 }
 
-export const levelOf = (s: GameState, k: HandKind): number => s.books[k] ?? 1;
+export const bookKey = (k: HandKind): HandKind => k === 'royal' ? 'sf' : k;
+export const levelOf = (s: GameState, k: HandKind): number => s.books[bookKey(k)] ?? 1;
 
 // 管道之外（onDiscard / onHeld / onRoundEnd）那三个挂载点的读数。
 // roll 必须**惰性**传进去：只有客人的 apply 真去摇才消耗随机流，
@@ -248,10 +252,17 @@ const baseCtx = (s: GameState, rand?: Rand) => ({
   handsLeft: s.handsLeft, deckLeft: s.deck.length, discardCount: s.discardPile.length,
   seatCount: s.seats.length, distinctKinds: Object.keys(s.handUse).length,
   night: s.night,
+  contractsDone: s.flags.club ? s.club?.completed ?? 0 : 0,
+  contractsTonight: s.flags.club ? s.club?.archive.filter(r=>r.night===s.night&&r.completed).length ?? 0 : 0,
   // target 故意**不在这里算**：targetOf→limits→baseCtx 会打回原形无限递归。
   // 要彩头的调用方自己补一个 { target } 进来（discard/settle 三处就是这么做的）
   roll: rand ? (p: number): boolean => rand.chance(p) : undefined,
 });
+
+function economyDefs(s:GameState):PatronDef[]{
+  const defs=s.seats.map(x=>patronById(x.pid));
+  return defs.flatMap((d,i)=>d.copy==='left'?(i>0&&!defs[i-1].copy?[defs[i-1]]:[]):[d]);
+}
 
 export const bossOf = (s: GameState): BossDef | null =>
   s.bossId ? BOSSES.find((b) => b.id === s.bossId) ?? null : null;
@@ -311,6 +322,11 @@ export function limits(s: GameState): Required<Mods> & { interestFlat: number } 
   }
   // 座位容量本身不因版本改变；负片是"不占座"，由 seatedCount() 体现
   acc.slots = Math.max(0, acc.slots);
+  acc.handSize=Math.max(1,Math.min(20,acc.handSize));
+  acc.hands=Math.max(1,Math.min(30,acc.hands));
+  acc.discards=Math.max(0,Math.min(30,acc.discards));
+  acc.seats=Math.max(0,Math.min(20,acc.seats));
+  acc.slots=Math.min(20,acc.slots);
   // 高利贷牌组把利息上限压到 £2，苛刻档再 −£3 会变成负数——那等于每回合扣钱，
   // 而 moneyOf 里 Math.min(cap, …) 会照单全收，所以这里必须夹住
 
@@ -363,6 +379,10 @@ export const stakeBlurb = (s: GameState): string => {
 };
 
 function setupStage(s: GameState, rand: Rand): void {
+  if (s.flags.club && (!s.club || s.club.night !== s.night)) {
+    if (!s.club) s.club = newClub(s.seed,s.night);
+    else { s.club.night=s.night;s.club.offer=contractOffer(s.seed,s.night);s.club.contract=null;s.club.work=freshWork(); }
+  }
   // 先定贵客再取限额：贵客会改手牌上限与出牌次数，顺序反了惩罚就整个落空
   s.bossId = s.stage === 2 ? rand.pick(BOSSES).id : null;
   // 随机事件的到期与换夜必须排在取限额**之前**：过期的那格还挂着，limits() 就会按旧的
@@ -460,6 +480,87 @@ export function chosenCards(s: GameState): Card[] {
   return s.hand.filter((c) => s.chosen.includes(c.id));
 }
 
+function beginClubAction(s:GameState):void {
+  if(!s.flags.club||!s.club)return;
+  s.club.offer=[];
+  s.club.work.actions++;
+}
+
+function updateCommission(g:Game,endNight=false):void {
+  const s=g.state,c=s.flags.club?s.club:null,r=c?.contract;
+  if(!c||!r||r.status!=='accepted')return;
+  const d=contractById(r.id)!;
+  r.value=Math.min(d.goal,contractValue(d.id,c.work,s.money));
+  if(r.value>=d.goal&&(!d.endOnly||endNight)){
+    r.status='ready';g.note(`委托「${d.name}」已达成，请在委托簿选择奖励`);
+  }else if(endNight){
+    r.status='failed';r.result='本夜未达成，无额外惩罚';
+    c.archive.push({id:r.id,night:s.night,result:r.result,completed:false});
+    c.archive=c.archive.slice(-60);g.record('contract',`${d.name}：${r.result}`);
+  }
+}
+
+export function acceptCommission(g:Game,id:string):boolean {
+  const s=g.state,c=s.flags.club?s.club:null;
+  if(!c||s.status!=='playing'||c.work.actions>0||c.contract||!c.offer.includes(id))return false;
+  c.contract={id,night:s.night,status:'accepted',value:0,result:''};c.offer=[];
+  g.record('contract',`接受委托「${contractById(id)!.name}」`);return true;
+}
+export function skipCommission(g:Game):boolean {
+  const c=g.state.flags.club?g.state.club:null;
+  if(!c||!c.offer.length)return false;
+  c.offer=[];g.record('contract','本夜谢绝委托');return true;
+}
+
+export const CLUB_GUESTS=['solicitor','archivist','courier','sponsor'];
+export const CLUB_CARDS=['relay','collector','salvage','bond','sealed','spectrum','modest','reserve'] as const;
+export function claimCommission(g:Game,choice:string):boolean {
+  const s=g.state,c=s.flags.club?s.club:null,r=c?.contract;
+  if(!c||!r||r.status!=='ready'||s.pendingEvent.length||!['playing','cleared','shop'].includes(s.status))return false;
+  const d=contractById(r.id)!,beforeLimits=limits(s);let result='';
+  if(choice==='cash'){s.money+=d.cash;result=`领取 £${d.cash}`;}
+  else if(d.reward==='book'&&choice.startsWith('book:')){
+    const k=choice.slice(5) as HandKind;
+    if(!BOOKS.some(b=>b.kind===k)||SECRET_HANDS.includes(k)&&!s.discovered.includes(k))return false;
+    s.books[bookKey(k)]=levelOf(s,k)+1;result=`${HANDS[k].name}升到 ${levelOf(s,k)} 级`;
+  }else if(d.reward==='card'&&choice.startsWith('card:')){
+    const id=choice.slice(5) as typeof CLUB_CARDS[number];
+    if(!CLUB_CARDS.includes(id)||totalCards(s)>=MAX_DECK)return false;
+    const i=CLUB_CARDS.indexOf(id);
+    s.deck.push({id:g.allocateId(),rank:[9,13,6,8,12,11,3,14][i],suit:SUITS[i%4],enh:'none',seal:id==='sealed'?'red':'none',special:id});
+    g.rand.shuffle(s.deck);result=`${specialById(id)!.name}加入牌组`;
+  }else if(d.reward==='guest'&&choice.startsWith('guest:')){
+    const id=choice.slice(6);
+    if(!CLUB_GUESTS.includes(id)||seatIds(s).includes(id)||seatedCount(s)>=limits(s).seats)return false;
+    s.seats.push(mkSeat(id));result=`${patronById(id).name}入席`;
+  }else return false;
+  const afterLimits=limits(s);
+  s.handsLeft=Math.max(0,s.handsLeft+afterLimits.hands-beforeLimits.hands);
+  s.discardsLeft=Math.max(0,s.discardsLeft+afterLimits.discards-beforeLimits.discards);
+  if(afterLimits.handSize>beforeLimits.handSize)drawTo(s,afterLimits.handSize,g.rand);
+  r.status='claimed';r.result=result;c.completed++;s.rep++;
+  c.archive.push({id:r.id,night:s.night,result,completed:true});c.archive=c.archive.slice(-60);
+  g.note(`委托「${d.name}」：${result}，声望 +1`);g.record('contract',`${d.name}：${result}，声望 +1`);return true;
+}
+
+export function storyChapter(s:GameState) {
+  const r=s.flags.club?s.club?.story:null;
+  return r&&!r.done&&s.night>=r.due?storyById(r.id)?.chapters[r.chapter]??null:null;
+}
+export function chooseStory(g:Game,id:string):boolean {
+  const s=g.state,r=s.club?.story,chapter=storyChapter(s);
+  if(!r||!chapter||s.pendingEvent.length||!['playing','cleared','shop'].includes(s.status))return false;
+  const choice=chapter.choices.find(c=>c.id===id);if(!choice)return false;
+  const cost=choice.ops.reduce((a,op)=>a+(op.t==='money'&&op.n<0?-op.n:0),0);
+  if(s.money<cost)return false;
+  if(choice.ops.some(op=>op.t==='addCard'&&totalCards(s)+op.cards.length>MAX_DECK))return false;
+  const out:string[]=[];for(const op of choice.ops)applyEventOp(g,op,'club-story',out);
+  r.history.push(`${chapter.title}：${choice.name}`);
+  r.chapter=choice.next;r.due=s.night+1;r.done=!!choice.ending;r.ending=choice.ending??'';
+  const result=out.join('，');g.note(`${chapter.title}：${result}`);
+  g.record('story',`${chapter.title}：${choice.name}${r.ending?`；结局「${r.ending}」`:''}`);return true;
+}
+
 /** 选牌预览：牌桌与引导都读这一份。带上基础流水/倍注，是为了能给第一次玩的人
  *  报出**此刻屏幕上那串真数字**（"对子：30 流水 × 2 倍注"），不是笼统一句"看牌型名"。 */
 export function preview(s: GameState):
@@ -482,6 +583,7 @@ export function play(g: Game): ScoreResult | null {
   const played = chosenCards(s);
   if (!played.length || played.length > 5) return null;
   const result = evaluate(played);
+  beginClubAction(s);
 
   // 上一手那几张已经打完：它们进弃牌堆（牌堆抽空时 refill 会把它洗回来接着发），
   // 不能等着被下一句 s.table = played 顶掉——顶掉就是每打一手有几张牌永久蒸发，
@@ -517,12 +619,28 @@ export function play(g: Game): ScoreResult | null {
       distinctKinds: Object.keys(s.handUse).length,
       night: s.night,
       target: targetOf(s),
+      contractsDone: s.flags.club ? s.club?.completed ?? 0 : 0,
     },
     // 吃概率的客人唯一的随机口。走同一条种子流，所以存档快进照样复现。
     roll: (p: number): boolean => rand.chance(p),
   });
 
   s.money += res.money;
+  const liveIds = new Set(res.events.filter(e=>e.t==='card').map(e=>e.id));
+  for (const c of played) if (c.special==='bond' && liveIds.has(c.id)) c.charge=Math.min(3,(c.charge??0)+1);
+  if (s.flags.club && s.club) {
+    const w=s.club.work, live=played.filter(c=>liveIds.has(c.id));
+    if(live.some(c=>c.suit==='h'))w.hearts++;
+    if(live.filter(c=>c.suit==='s'||c.suit==='c').length>=2)w.black++;
+    w.faces+=live.filter(c=>c.rank>=11&&c.rank<=13).length;
+    w.curios+=live.filter(c=>c.special).length;
+    if(played.length<=3)w.small++;
+    if(result.kind==='pair'||result.kind==='twopair')w.pair++;
+    if(live.length===played.length&&played.length>=3)w.full++;
+    const at=w.streak.indexOf(result.kind);
+    w.streak=at<0?[...w.streak,result.kind].slice(-3):[...w.streak.slice(at+1),result.kind];
+    updateCommission(g);
+  }
   s.score += res.value;
   s.runStats.bestStage = Math.max(s.runStats.bestStage, s.score);
   s.runStats.plays += 1;
@@ -540,8 +658,8 @@ export function play(g: Game): ScoreResult | null {
     }
   }
   for (const id of res.claimedNow) {
-    if (!s.claimed.includes(id)) s.claimed.push(id);
     const d = THRESHOLDS.find((x) => x.id === id);
+    if (d?.span==='stage' && !s.claimed.includes(id)) s.claimed.push(id);
     if (d) g.note(`够到「${d.name}」：${d.blurb}`);
   }
   s.handsLeft -= 1;
@@ -680,9 +798,12 @@ export function discard(g: Game): number {
   const s = g.state;
   if (s.pendingEvent.length) return 0;
   if (s.status !== 'playing' || !s.chosen.length || s.discardsLeft <= 0) return 0;
+  beginClubAction(s);
+  if(s.flags.club && s.club){s.club.work.discards++;}
   const boss = bossOf(s);
   const ids = s.chosen;
   const gone = s.hand.filter((c) => ids.includes(c.id));
+  for(const c of gone)if(c.special==='salvage')c.charge=Math.min(4,(c.charge??0)+1);
   s.hand = s.hand.filter((c) => !ids.includes(c.id));
   s.discardPile.push(...gone);
   s.chosen = s.chosen.filter((id) => s.hand.some((c) => c.id === id));
@@ -693,8 +814,7 @@ export function discard(g: Game): number {
   let money = 0;
   const lim = limits(s);
   for (const c of gone) {
-    for (const seat of s.seats) {
-      const p = patronById(seat.pid);
+    for (const p of economyDefs(s)) {
       if (p.hook !== 'onDiscard' || !p.apply) continue;
       const e = p.apply({ ...baseCtx(s, g.rand), card: c, target: targetOf(s) });
       if (e) money += (Array.isArray(e) ? e : [e]).reduce((a, x) => a + (x.money ?? 0), 0);
@@ -709,6 +829,7 @@ export function discard(g: Game): number {
   s.money = Math.max(0, s.money + money);
 
   drawTo(s, gone.length, g.rand);
+  updateCommission(g);
   s.chosen = [];
   if (stranded(s) && !reprieve(g)) { s.status = 'lost'; g.note('牌都弃尽了，再无一张可出'); }
   // 弃牌也算"这一夜动过手"：触发判据数的是出牌与弃牌合起来的次数
@@ -897,6 +1018,10 @@ function resolveEvent(g: Game, id: string, drawn = -1): string | null {
   s.chosen = s.chosen.filter((id) => s.hand.some((c) => c.id === id));
   // 事件可能把上限压低了（招灵会那种）：多出来的按既有规矩搁进弃牌堆，而不是硬留在手上
   trimHand(g);
+  if(s.status==='playing'&&s.score>=targetOf(s))settle(g);
+  else if(s.status==='playing'&&s.handsLeft<=0&&!reprieve(g)&&!bufferRound(g)){
+    s.status='lost';g.note('事件用尽了本场最后一次出牌机会');
+  }
   g.note(`${def.name}：${result}`);
   g.record('event', `${def.name}：${result}`);
   return result;
@@ -945,10 +1070,15 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
     return;
   }
   if (op.t === 'rule') {
+    const before = limits(s);
     s.eventMods.push({
       from, scope: op.scope, night: s.night,
       hands: op.scope === 'hand' ? 1 : undefined, rule: op.m,
     });
+    const after = limits(s);
+    s.handsLeft = Math.max(0, s.handsLeft + after.hands - before.hands);
+    s.discardsLeft = Math.max(0, s.discardsLeft + after.discards - before.discards);
+    if (after.handSize > before.handSize) drawTo(s, after.handSize, g.rand);
     out.push(modLine(op.m, op.scope));
     return;
   }
@@ -970,7 +1100,7 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
     for (const c of op.cards) {
       if (totalCards(s) >= MAX_DECK) { out.push('牌堆已满，加不下了'); return; }
       const card: Card = {
-        id: uid++, rank: c.rank, suit: c.suit, enh: c.enh ?? 'none', seal: c.seal ?? 'none',
+        id: g.allocateId(), rank: c.rank, suit: c.suit, enh: c.enh ?? 'none', seal: c.seal ?? 'none',
         ...(c.special ? {special:c.special} : {}),
       };
       if (op.to === 'hand') {
@@ -995,7 +1125,7 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
       const rolled = g.rand.int(pool.length);        // 有没有人抽都照旧摇这一位：抽牌只换"哪张"，不挪后面的牌序
       const at = drawnAt(pick, pool);                // 只认一次：抽中的那张用掉就作废
       const src = pool[at < 0 ? rolled : at];
-      const copy: Card = { id: uid++, rank: src.rank, suit: src.suit, enh: src.enh, seal: src.seal, ...(src.special ? {special:src.special} : {}) };
+      const copy: Card = { ...src, id: g.allocateId() };
       s.deck.push(copy);
       g.rand.shuffle(s.deck);
       out.push(`誊出${cardLabel(copy)}`);
@@ -1099,7 +1229,7 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
   }
   if (op.t === 'grantSeat') {
     if (seatedCount(s) >= limits(s).seats) { out.push('座位已满，谁来也坐不下'); return; }
-    const pool = PATRONS.filter((x) => x.rarity === op.rarity && !seatIds(s).includes(x.id));
+    const pool = PATRONS.filter((x) => (!x.clubOnly||s.flags.club) && x.rarity === op.rarity && !seatIds(s).includes(x.id));
     if (!pool.length) { out.push('名录上这一档已无生面孔'); return; }
     if (op.price > s.money) { out.push('银钱不够，名录合上了'); return; }
     const p = g.rand.pick(pool);
@@ -1119,8 +1249,8 @@ function applyEventOp(g: Game, op: EventOp, from: string, out: string[], pick: D
   if (op.t === 'bookUp') {
     for (let i = 0; i < op.n; i++) {
       const k = op.kind ?? g.rand.pick(Object.keys(HANDS) as HandKind[]);
-      s.books[k] = (s.books[k] ?? 1) + 1;
-      out.push(`${HANDS[k].name}升到 ${s.books[k]} 级`);
+      s.books[bookKey(k)] = levelOf(s,k) + 1;
+      out.push(`${HANDS[k].name}升到 ${levelOf(s,k)} 级`);
     }
     return;
   }
@@ -1158,7 +1288,7 @@ export function settle(g: Game): void {
   if (gold) lines.push({ label: '手中金票', amount: gold });
 
   // 挂在"握于手中"和"局终结账"上的客人，尾款在这里付
-  const defs = s.seats.map((x) => patronById(x.pid));
+  const defs = economyDefs(s);
   for (const c of s.hand) {
     for (const p of defs) {
       if (p.hook !== 'onHeld' || !p.apply) continue;
@@ -1179,7 +1309,7 @@ export function settle(g: Game): void {
     const top = (Object.keys(s.handUse) as HandKind[])
       .sort((a, b) => (s.handUse[b] ?? 0) - (s.handUse[a] ?? 0))[0];
     if (top) {
-      s.books[top] = levelOf(s, top) + 1;
+      s.books[bookKey(top)] = levelOf(s, top) + 1;
       lines.push({ label: `藏书阁 · ${HANDS[top].name} 升一级`, amount: 0 });
     }
   }
@@ -1196,6 +1326,8 @@ export function settle(g: Game): void {
   });
   s.chosen = [];
   s.status = 'cleared';
+  for(const c of s.hand)if(c.special==='collector')c.charge=Math.min(4,(c.charge??0)+1);
+  if(s.flags.club && s.club){s.club.work.wins++;if(s.raisedHere>=1)s.club.work.bold++;updateCommission(g,s.stage===2);}
   // 不清 s.table：赢家那几张要留在桌面上让人看清，等下一场 setupStage 再收
   g.note(`${stakeLabel(s)} 结清，入账 £${total}`);
 }
@@ -1211,8 +1343,8 @@ function rollEdition(rand: Rand): Edition {
   return 'none';
 }
 
-function weightedPatron(rand: Rand, owned: string[], minRep: number): PatronDef | null {
-  const pool = PATRONS.filter((p) => !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= minRep);
+function weightedPatron(rand: Rand, owned: string[], minRep: number, club=false): PatronDef | null {
+  const pool = PATRONS.filter((p) => (!p.clubOnly||club) && !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= minRep);
   if (!pool.length) return null;
   const total = pool.reduce((a, p) => a + RARITY_WEIGHT[p.rarity], 0);
   let x = rand.next() * total;
@@ -1244,7 +1376,7 @@ export function restock(g: Game): void {
   // 逐个排除：两次都用同一份"已拥有"名单的话，同一位客人会被摆上两个货位
   const offered = [...seatIds(s)];
   for (let i = 0; i < 2; i++) {
-    const p = weightedPatron(rand, offered, rep);
+    const p = weightedPatron(rand, offered, rep, s.flags.club);
     if (p) {
       offered.push(p.id);
       const ed = rollEdition(rand);
@@ -1267,6 +1399,7 @@ export const rerollPrice = (s: GameState): number => {
 
 export function reroll(g: Game): boolean {
   const s = g.state;
+  if (s.status !== 'shop') return false;
   const price = rerollPrice(s);
   if (s.money < price) return false;
   s.money -= price;
@@ -1277,7 +1410,7 @@ export function reroll(g: Game): boolean {
   s.shop = s.shop.map((slot) => {
     if (slot.sold) return slot;
     if (slot.kind === 'patron') {
-      const p = weightedPatron(rand, seatIds(s), rep);
+      const p = weightedPatron(rand, seatIds(s), rep, s.flags.club);
       if (!p) return slot;
       const ed = rollEdition(rand);
       return { ...slot, pid: p.id, edition: ed, price: priceOf(p.cost, ed, scale) };
@@ -1293,6 +1426,7 @@ export function reroll(g: Game): boolean {
 
 export function buy(g: Game, i: number): boolean {
   const s = g.state;
+  if (s.status !== 'shop') return false;
   const slot = s.shop[i];
   if (!slot || slot.sold) return false;
   if (s.money < slot.price) return false;
@@ -1442,9 +1576,10 @@ export function useConsumable(g: Game, index: number, targetIds: number[]): bool
   const c = s.consumables[index];
   if (!c) return false;
   if (c.t === 'book') {
-    s.books[c.id] = levelOf(s, c.id) + 1;
-    g.note(`${HANDS[c.id].name} 升到 ${s.books[c.id]} 级`);
-    g.record('item', `${HANDS[c.id].book}：升至 ${s.books[c.id]} 级`);
+    s.books[bookKey(c.id)] = levelOf(s, c.id) + 1;
+    g.note(`${HANDS[c.id].name} 升到 ${levelOf(s,c.id)} 级`);
+    g.record('item', `${HANDS[c.id].book}：升至 ${levelOf(s,c.id)} 级`);
+    if(s.flags.club&&s.club)s.club.work.items++;
     s.consumables.splice(index, 1);
     return true;
   }
@@ -1483,7 +1618,7 @@ export function useConsumable(g: Game, index: number, targetIds: number[]): bool
         g.note('牌堆已经挤不下了');
         return false;
       }
-      const copy: Card = { id: uid++, rank: t!.rank, suit: t!.suit, enh: t!.enh, seal: t!.seal, ...(t!.special ? {special:t!.special} : {}) };
+      const copy: Card = { ...t!, id: g.allocateId() };
       s.deck.push(copy);
       g.rand.shuffle(s.deck);
       break;
@@ -1492,6 +1627,7 @@ export function useConsumable(g: Game, index: number, targetIds: number[]): bool
   g.note(l.picks ? `${l.name} 用在了 ${RANK(t!)}${SUITSym(t!.suit)} 上` : `${l.name} 抽到了`);
   g.record('item', l.picks ? `${l.name} 用在 ${RANK(t!)}${SUITSym(t!.suit)}` : `${l.name}：${g.state.log[0]}`);
   s.consumables.splice(index, 1);
+  if(s.flags.club&&s.club)s.club.work.items++;
   return true;
 }
 
@@ -1508,6 +1644,8 @@ export function setRaise(g: Game, levels: number): void {
 
 function leaveShop(g: Game): void {
   const s = g.state;
+  if (s.status !== 'shop' && s.status !== 'cleared') return;
+  if(s.flags.club && s.club?.contract?.status==='ready')return;
   if (s.stage < 2) {
     s.stage = (s.stage + 1) as Stage;
   } else {
@@ -1521,6 +1659,7 @@ function leaveShop(g: Game): void {
 
 export function continueEndless(g: Game): void {
   const s = g.state;
+  if (s.mode === 'daily' || s.status !== 'won') return;
   s.status = 'cleared';
   s.endless = true;
   s.night += 1;
@@ -1548,6 +1687,7 @@ export interface RunOpts {
 }
 
 export class Game {
+  private nextId = 53;
   public state: GameState;
   public rand: Rand;
   public notes: string[] = [];
@@ -1559,7 +1699,6 @@ export class Game {
     const diff: Diff = mode === 'daily' ? 'standard' : diffById(o.diff ?? 'standard').id;
     const df = diffById(diff);
     this.rand = new Rand(seed);
-    uid = 1;
     const nights = mode === 'daily' ? DEFAULT_NIGHTS : clampNights(o.nights ?? DEFAULT_NIGHTS);
     // 每日一局的"同一副牌序"包含牌组与局长：锁标准局、锁八夜参照档，
     // 否则同一天两个人起手不一样、终点也不一样，"同一局"就只剩个名字。
@@ -1580,11 +1719,12 @@ export class Game {
       claimed: [], betReprieves: 0, buffer: START_BUFFER, signature: '', tutorial: [], guide: [],
       eventAt: 0, nightActions: 0, pendingEvent: [], events: [], eventMods: [],
       runStats: newRunStats(), decisions: [],
+      club: null,
     };
     const s = this.state;
     s.money = Math.max(0, s.money + (dk.money ?? 0) + df.money);
     if (dk.grant) {
-      const pool = PATRONS.filter((x) => x.rarity === dk.grant);
+      const pool = PATRONS.filter((x) => !x.clubOnly && x.rarity === dk.grant);
       if (pool.length) s.seats.push(mkSeat(this.rand.pick(pool).id));
     }
     // 签名宾：开局白送一位**玩家自己挑的**客人。
@@ -1592,7 +1732,7 @@ export class Game {
     // 主随机流一步都不许多消耗，否则发牌与铺子整体后移，老档快进就会落到别的牌上。
     if (s.flags.draft && o.signature) {
       const sig = PATRONS.find((x) => x.id === o.signature);
-      if (sig && !seatIds(s).includes(sig.id)) {
+      if (sig && (!sig.clubOnly||s.flags.club) && !seatIds(s).includes(sig.id)) {
         s.seats.push(mkSeat(sig.id));
         s.signature = sig.id;
       }
@@ -1603,7 +1743,15 @@ export class Game {
 
   /** 读档后要把自增 id 推到已有最大值之后，否则「誊抄」会造出与现有牌撞 id 的牌 */
   bumpUid(to: number): void {
-    if (to > uid) uid = to;
+    if (to > this.nextId) this.nextId = to;
+  }
+
+  allocateId(): number {
+    const all = [...this.state.deck, ...this.state.hand, ...this.state.table, ...this.state.discardPile];
+    const used = new Set(all.map(c => c.id));
+    if (!Number.isSafeInteger(this.nextId) || this.nextId >= Number.MAX_SAFE_INTEGER) this.nextId = 1;
+    while (used.has(this.nextId)) this.nextId += 1;
+    return this.nextId++;
   }
 
   note(text: string): void {

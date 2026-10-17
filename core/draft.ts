@@ -20,7 +20,7 @@ const DRAFT_SALT = 0x51ee7;
 
 /** 开局够不够格进候选池：声望门槛按常客/稀客/贵客/传说分档 */
 export function draftPool(rep: number, owned: string[] = []): PatronDef[] {
-  return PATRONS.filter((p) => !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= rep);
+  return PATRONS.filter((p) => !p.clubOnly && !owned.includes(p.id) && RARITY_MIN_REP[p.rarity] <= rep);
 }
 
 // 局长对候选的偏置。**6..9 夜一律 1**：八夜是参照档，那一档的候选必须与现在逐位相同

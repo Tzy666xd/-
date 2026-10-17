@@ -219,7 +219,7 @@
           H.start(4243);click('#btnLastReport');
           must('新局还能查阅上一局战报',!q('#sharecard').classList.contains('hidden')&&read('guinea.last-report.v1')===JSON.stringify(report));
           click('#btnCloseShare');click('#btnCodex');click('[data-tab="rare"]');
-          must('稀奇牌图鉴六种完整说明',document.querySelectorAll('.rare-entry').length===6&&q('#codex').textContent.indexOf('压舱牌')>=0);
+          must('稀奇牌图鉴十四种完整说明',document.querySelectorAll('.rare-entry').length===14&&q('#codex').textContent.indexOf('压舱牌')>=0&&q('#codex').textContent.indexOf('收藏牌')>=0);
           H.closePanels();q('#title').classList.remove('hidden');var old=H.prefsCopy.flags.events;
           click('#btnEventsToggle');
           must('标题奇遇开关实际更新新局偏好',H.prefsCopy.flags.events!==old&&q('#btnEventsToggle').getAttribute('aria-pressed')===String(!old));
@@ -273,7 +273,7 @@
     click('#btnCodex');
     must('本局发现后显出三种隐秘示例', document.querySelectorAll('.hand-example').length === 13);
     click('[data-tab="patrons"]');
-    must('客人目录完整', document.querySelectorAll('.catalog-entry').length === 32);
+    must('客人目录完整', document.querySelectorAll('.catalog-entry').length === 36);
     var search = q('#catalogSearch'); search.value = '霍布斯'; search.dispatchEvent(new Event('input'));
     must('名称搜索过滤客人', document.querySelectorAll('.catalog-entry').length === 1 && q('.catalog-entry h3').textContent === '管家霍布斯');
     var seedBefore = state.seed, handBefore = state.handsLeft;
@@ -2126,6 +2126,9 @@
     must('localStorage 在这个 App 里能用', store('guinea.probe', '1') && read('guinea.probe') === '1');
     store('guinea.probe', null);
     var old = H.game.state.seed;
+    click('#btnAgain');
+    must('局内隐藏的再开一局不生效',H.game.state.seed===old);
+    H.game.state.status='lost';H.showEnd(false);
     click('#btnAgain');
     must('再开一局换了种子', H.game.state.seed !== old);
     must('种子输入框跟着改成真正开起来的那局', Number(q('#seedInput').value) === H.game.state.seed);

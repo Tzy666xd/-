@@ -3,7 +3,7 @@
 类小丑牌的 Mac 卡牌 Roguelike。**古典英伦：你经营一间维多利亚时代的私人牌局，替它做庄。**
 交付物：`~/Desktop/几尼.app`（双击即玩，无网络依赖）。
 
-**接手先读 `dev/handoff-2026-10-15-share.md`，再读 `dev/handoff-2026-10-14-second.md` 与 `dev/handoff-2026-10-14.md`**：当前状态快照、门禁实测数字、环境陷阱、等用户
+**接手先读 `dev/handoff-2026-10-17-club.md` 与 `dev/handoff-2026-10-15-share.md`，再读 `dev/handoff-2026-10-14-second.md` 与 `dev/handoff-2026-10-14.md`**：当前状态快照、门禁实测数字、环境陷阱、等用户
 拍板的问题清单、提交前检查表都在那里。本文档是约束与命令的速查。
 
 ## 一句话架构
@@ -19,7 +19,8 @@ game/
     effects.ts    6 挂载点 × 6 效果类别的矩阵定义
     content.ts    座上宾 / 引荐信 / 牌谱 / 会员特权 / 贵客 / 起手牌组（全是数据）
     game.ts       状态机 + 经济 + 铺子 + 账本
-    flags.ts      九个功能开关：存档里的 flags 当外部输入洗，默认全关
+    flags.ts      十个功能开关：存档里的 flags 当外部输入洗，默认全关
+    contracts.ts / stories.ts / club.ts  十二份委托、四条跨夜故事及状态校验
     thresholds.ts 回合阈值奖励 / bets.ts 加注档位与失手惩罚
     sets.ts tag 套装 / growth.ts 客人长进 / layers.ts 材质与蜡封两层
     draft.ts      开局五选一的候选池（派生随机流，不挤动主流）
@@ -27,12 +28,12 @@ game/
     lengths.ts    局长：3～15 夜的终场彩头表 + 弯向设计终点的曲线系数（八夜是参照档）
     music.ts      八首曲子的谱面与 plan()：纯函数排声部
     sound.ts      27 个音效配方（层/连击抬升/花色明暗），纯函数算参数
-    portrait.ts   32 位客人的剪影肖像零件表（代码画，无素材）
+    portrait.ts   36 位客人的剪影肖像零件表（代码画，无素材）
     pips.ts       牌面美术：四花色 SVG、2..10 经典点位表、人头纹章、牌背几何（也是代码画，无素材；
                   牌背的菱格底纹在 CSS，因为 SVG 平铺要 id，六张牌背同屏就有六个同名 id 互相抢）
     tutorial.ts   七句按局面触出的新手提醒（纯函数 stepFor，进度进存档）
     guide.ts      引导关：十四节课的课程表 + 逐课翻页（锁死种子、手松档、最短三夜，进度进存档）
-    selftest.ts   940 条判据 + 反证
+    selftest.ts   1314 条判据 + 反证（含委托、故事与审查回归）
     save.ts       存档与结构校验（外部输入不可信）
     fuzz.ts       不变量穷举（随机策略 + 每局随机开关 + 破坏性专项 + 深推进到无尽）
     sim.ts        贪心机器人，给平衡一个下界
@@ -42,15 +43,16 @@ game/
   shell/        Swift WKWebView 壳（app://local scheme）+ IconRender（代码画图标）
   tools/        build-web.mjs / serve.mjs / shots.sh / sheet.py / stylesheet.py
                 falsify.sh / uitest.js + uitest.sh / falsify-ui.sh / preflight.sh
-                portrait-check.py（肖像可辨性量具）/ portrait-sheet.py（32 张对照表）
+                portrait-check.py（肖像可辨性量具）/ portrait-sheet.py（36 张对照表）
                 anchor-audit.py（3 秒体检两套反证的锚点：失配/多处/残留注入，不开窗口）
   shots/        验收截图 + sheet.png 对照表
 ```
 
-## 玩法功能（八个开关 + 第九个「随机事件」，全部默认关）
+## 玩法功能（原九个开关 + 第十个「委托与故事」，全部默认关）
 
 加注档位表 / 座位邻接共鸣 / 回合阈值奖励 / tag 套装 / 客人长进 / 卡牌两层数据表 /
 弃牌堆可查看可捞回 / 开局五选一签名宾 / **随机事件（每夜递三张候选，三选一或让牌局自决）**。
+另有 `club`：十二份宾客委托与四条连锁故事。开局「经营奇遇」预设统一开启相关规则。
 **每个一个 feature flag，默认全关**——`core/flags.ts` 里
 "关掉必须等于这个功能不存在"是有判据的，不是口头承诺。
 设计与实测见 `dev/features-2026-10-10.md` 与 `dev/features-2026-10-12.md`；改计分管道之前先读 `dev/phase0-pipeline.md`
@@ -87,14 +89,14 @@ game/
 
 ```bash
 cd game
-node core/selftest.ts          # 842 条判据，exit code 当门禁
-bash tools/falsify.sh          # 往内核注入 233 处破坏，本轮 228 项具名捕获、5 项抛错暴露
+node core/selftest.ts          # 1314 条判据，exit code 当门禁
+bash tools/falsify.sh          # 往内核注入 255 处破坏；最终结果见最新交接与验收日志
                              # ONLY=关键词 只复验几条；STOP_FAIL=1 第一处红就收工
                                #   条目里的 \n 会翻成真换行（两个脚本现在都一样）：同一行文本
                                #   在文件里出现两处时，单行锚点永远只打得到第一处，得多行锚点；
                                #   命中多处时报告里会标「锚点有多处，改的是第一处」，不静默
 node core/fuzz.ts              # 不变量穷举：随机策略 + 破坏性销账 + 深推进到第 11 夜
-                               #   每一局自己抽一份 feature flags（九个新功能默认全关，
+                               #   每一局自己抽一份 feature flags（十个功能默认全关，
                                #   不让它随机开就一步都走不进新玩法，绿灯是假的）
 node core/sim.ts               # 30 个种子的贪心机器人，给平衡一个下界（--nights=N 换局长）
 node tools/guide-check.mjs     # 引导关实测：按课程表把十四节课走一遍，钉住教学局那个种子（--search 找替补）
@@ -106,7 +108,7 @@ bash tools/shots.sh            # 无头出 35 张场景 + 4 种画法 + shots/sh
                                #   牌背与抽牌礼：29-backs（六张扣过来的牌）/ 30-fan（?events=1&fan=1
                                #     真打到递事那一拍，再替玩家点一条要挑牌的——拍的就是玩家会看见那一屏）
                                #   另出 shots/styles.png = 四种画法同场景对照表
-bash tools/uitest.sh           # 界面行为门禁：19 档；最新查阅复盘档 39 条
+bash tools/uitest.sh           # 界面行为门禁：26 档；新增经营奇遇及三组跨局/事件回归
                                # 第二批完整正常基线 495 条；补充结业样本后查阅专项 39 条通过
                                # 另 4 条耗时未评（详见新交接）
                                #   （本轮显示器休眠，另有 4 条耗时门限记「未评」，不计入通过数）
@@ -124,7 +126,7 @@ bash tools/uitest.sh           # 界面行为门禁：19 档；最新查阅复�
                                #   开头会实测动画时钟能不能自己走（clock-probe），卡住就代打并复跑
                                #   显示器睡着时会自动代打动画时钟，并把量不到的时间门限
                                #   显式记成「未评 N 条」而不是伪装成通过
-bash tools/falsify-ui.sh       # 界面层 122 处破坏，要求拿到真实界面失败裁决
+bash tools/falsify-ui.sh       # 界面层 136 处破坏，要求拿到真实界面失败裁决
                                #   跑法带 STOP_FAIL=1（注入后第一档变红就收工）+ MODES=指定档，
                                #   反证只问红没红，没必要把十六档全跑完
                                #   先要求未注入的基线全绿，否则注入判据是空判据
@@ -132,9 +134,9 @@ bash tools/preflight.sh        # 上架前 45 项实测（隐私清单/无 alpha
 bash build-app.sh              # 打 .app（通用二进制）并同步到 ~/Desktop
 
 # 美术两件事也只能量，不能"看着觉得行"：
-python3 tools/portrait-check.py --min 12   # 32 位客人逐个真渲染，量肖像区两两灰度差
+python3 tools/portrait-check.py --min 12   # 36 位客人逐个真渲染，量肖像区两两灰度差
                                #   实测中位 26.1、最差 12.3、496 对里 0 对低于 12
-python3 tools/portrait-sheet.py /tmp/s.png # 32 张拼一张对照表，供肉眼判"分得开"之外好不好看
+python3 tools/portrait-sheet.py /tmp/s.png # 36 张拼一张对照表，供肉眼判"分得开"之外好不好看
 
 五道门禁缺一不可：selftest 只保证"想到的情况"，falsify 保证这些判据真的会红，
 fuzz 保证没想到的情况不会把游戏打死，shots 保证画面真的变了，
@@ -211,14 +213,15 @@ uitest 保证界面层的行为与判据对得上——内核看不见 DOM。
 - **命名**：`几尼` 只是占位工作名（几尼 = 8 先令金币）。改 App 名只动 `build-app.sh` 的 `APP_NAME`。
 - **美术风格**：四套画法已实现并可在 设置 → 画法 里实时切换，对照表见 `shots/styles.png`：
   A 维多利亚牌局（当前默认）/ B 装饰艺术 Art Deco / C 铜版画雕刻 / D 暖调皮革。**等他挑**。
-- **内容量**：32 位座上宾（含四种版本，开局可五选一请一位当签名宾）/ 12 封引荐信 / 12 本牌谱 / 8 个会员特权 /
-  5 位贵客 / 10 副起手牌组（5 副通用 + 5 副按局长档位限定）/ 4 种蜡封。要不要继续往原版那个量级走，等他试玩后定。
+- **内容量**：36 位座上宾（含四种版本，开局可五选一请一位当签名宾）/ 12 封引荐信 / 12 本牌谱 / 8 个会员特权 /
+  5 位贵客 / 10 副起手牌组（5 副通用 + 5 副按局长档位限定）/ 4 种蜡封 / 14 种稀奇牌。
+  本轮已批准并实现十二份委托与四条故事；继续扩充到更大规模仍等试玩反馈。
 - **光谱牌 / 挑战模式 / 触屏与 iPhone 版 / 英文本地化**：还没做，是否要。
 - **上架硬门槛**：需要开发者账号做签名与公证，脚本能产出可提交的 zip，但提交那一步只能你点。
 - **背景乐已有八首现场合成的程序化曲子**（设置 → 背景曲，鼠标停在曲名上看它适合什么时候放），
   不挂任何音频素材；要不要再加曲子、或给每位签名宾一句出场白，等他试玩后定。
 - **客人形象是代码画的剪影肖像**（`core/portrait.ts`：头形/帽/发/脸/肩/手中物/底色七层零件，
-  32 位各一条），首字母降级成右下角刻印。可辨性由 `tools/portrait-check.py` 量，不是看着觉得行。
+  36 位各一条），首字母降级成右下角刻印。可辨性由 `tools/portrait-check.py` 量，不是看着觉得行。
 
 ## 存档设计（第 2 轮）
 

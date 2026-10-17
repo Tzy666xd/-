@@ -46,10 +46,12 @@ export function drawReport(r: RunReport): HTMLCanvasElement {
   clipped(`最终客人  ${r.guests.join(' · ')||'空席'}`,1035);
   clipped(`稀奇牌  ${r.rareCards.join(' · ')||'这一局未遇见'}`,1080,22);
   clipped(`会员特权  ${r.privileges.join(' · ')||'无'}`,1125,22);
-  text(r.choices.length>4?'关 键 选 择  ·  节选 4 条，文案保留完整记录':'关 键 选 择',80,1182,22,muted);
-  let y=1232;
+  if(r.story)clipped(`委托履约 ${r.completedContracts??0} 份 · ${r.story}`,1169,21);
+  const shown=r.story?3:4;
+  text(r.choices.length>shown?`关 键 选 择  ·  节选 ${shown} 条，复制文案可看更多`:'关 键 选 择',80,r.story?1220:1182,22,muted);
+  let y=r.story?1270:1232;
   const choices=r.choices.length?r.choices:['这一局尚未留下经营选择。'];
-  for(const [i,s] of choices.slice(-4).entries()){
+  for(const [i,s] of choices.slice(-shown).entries()){
     text(`0${i+1}`,80,y,22,gold,'Baskerville, serif');
     const short=s.length>66?s.slice(0,65)+'…':s;
     y=line(short,135,y,970,22)+13;

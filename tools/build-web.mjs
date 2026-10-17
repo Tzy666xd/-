@@ -5,8 +5,9 @@
 import { stripTypeScriptTypes } from 'node:module';
 import { readdirSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, existsSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const outDir = join(root, 'web', 'gen');
 const quiet = process.argv.includes('--quiet');
 

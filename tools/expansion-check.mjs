@@ -15,7 +15,7 @@ export function runExpansion(t) {
   const cue=(played,extra={})=>compute(played,extra).events.find(e=>e.t==='card');
   const held=[card(20),card(21),card(22)];
   const env=(money=0,handIndex=0)=>({money,handIndex,rep:0,raised:0,discardsUsed:0});
-  t('稀奇牌六种身份互不重复',SPECIALS.length===6&&new Set(SPECIALS.map(x=>x.id)).size===6);
+  t('稀奇牌十四种身份互不重复',SPECIALS.length===14&&new Set(SPECIALS.map(x=>x.id)).size===14);
   for(const layers of [false,true]) {
     const c=card(1,2,'crest');
     t(`会客牌三客 +36 流水 / layers=${layers}`,cue([c],{layers,seats:PATRONS.slice(0,3).map(p=>mkSeat(p.id))}).addChips===38);

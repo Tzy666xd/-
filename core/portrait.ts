@@ -42,6 +42,10 @@ export interface Portrait {
 
 /** 每位一条。零件的取舍按 role/blurb 来，让"看见的形状"和"读到的身份"对得上 */
 export const PORTRAITS: Record<string, Portrait> = {
+  solicitor:{hat:'biretta',hair:'long',head:'narrow',face:'monocle',collar:'ruff',prop:'seal',tone:13},
+  archivist:{hat:'mobcap',hair:'braid',head:'egg',face:'spectacle',collar:'shawl',prop:'cards',tone:-15},
+  courier:{hat:'softcap',hair:'curly',head:'tilt',face:'moustache',collar:'military',prop:'quill',tone:16},
+  sponsor:{hat:'tophat',hair:'long',head:'square',face:'lorgnette',collar:'lace',prop:'purse',tone:-16},
   hobbs:     { hat: 'none',    hair: 'short',  head: 'narrow', face: 'plain',     collar: 'bow',      prop: 'key',     tone: 8 },
   payne:     { hat: 'softcap', hair: 'short',  head: 'broad',  face: 'moustache', collar: 'plain',    prop: 'whip',    tone: -9 },
   countess:  { hat: 'veil',    hair: 'bun',    head: 'egg',    face: 'lorgnette', collar: 'lace',     prop: 'cards',   tone: -14 },
@@ -81,6 +85,7 @@ export const PORTRAITS: Record<string, Portrait> = {
  * 这里给撞车的几位换了可区分的双字母刻印；界面取不到这张表时退回 def.monogram。
  */
 export const MONOGRAM: Record<string, string> = {
+  solicitor:'CT',archivist:'AD',courier:'MP',sponsor:'GS',
   hobbs: 'H', payne: 'PY', countess: 'CO', clerk: 'CL', turf: 'T', rent: 'RE', odd: 'O',
   almanac: 'AL', heiress: 'I', cousin: 'V', house: '♠', baronet: 'B', twins: 'Ⅱ', sharp: '?',
   watchman: 'W', abacus: 'X', paperer: 'F', rightseat: 'RS', critic: 'CR', regular: 'G',

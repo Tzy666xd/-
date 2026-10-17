@@ -227,6 +227,7 @@ refute('老板的抽水不该改座位数', limits(g2.state).seats !== 3);
 
 // 抬注：不花钱的纯风险决策，抬了彩头就硬，但赏金与盈余折现跟着涨
 const g3 = new Game(777);
+g3.state.status='shop';
 setRaise(g3, 2);
 g3.next();                                     // 便宴 → 正宴，抬注在本夜落地
 t('抬注 2 层把彩头乘 2.25', targetOf(g3.state) === 1010);
@@ -236,7 +237,7 @@ g3.state.score = targetOf(g3.state);
 settle(g3);
 t('抬注换来更高赏金（正宴 £4→£8）', g3.state.money - m3 >= 8);
 t('抬注层数计进声望', g3.state.rep === 2);
-refute('不抬注时彩头不该被抬高', (() => { const x = new Game(777); x.next(); return targetOf(x.state) !== 450; })());
+refute('不抬注时彩头不该被抬高', (() => { const x = new Game(777); x.state.status='shop';x.next(); return targetOf(x.state) !== 450; })());
 
 // 每手牌累加，不是取最好一手（这条曾写错过）
 const g4 = new Game(11);
@@ -643,6 +644,7 @@ t('负片客人不占座位', limits(negState.state).seats === 3 && seatedCount(
   g.state.seats = ['hobbs', 'payne', 'clerk', 'turf'].slice(0, lim.seats).map((id) => mkSeat(id));
   g.state.money = 500;
   g.state.shop = [{ kind: 'patron', pid: 'baronet', edition: 'negative', price: 10, sold: false }];
+  g.state.status='shop';
   const seatsBefore = g.state.seats.length;
   t('座位坐满时仍能买下负片客人', buy(g, 0) === true);
   t('买下负片只多席位不多占座', g.state.seats.length === seatsBefore + 1
@@ -965,6 +967,7 @@ t('模式四种且 id 唯一', MODES.length === 4 && new Set(MODES.map((m) => m.
   const p2 = new Game(5154, 'standard', { mode: 'practice' });
   p2.state.discardPile.push(...p2.state.hand.splice(0), ...p2.state.table.splice(0));
   p2.state.deck = [];
+  p2.state.status='cleared';
   p2.next();
   t('修行档无牌可发时把牌堆洗回来', p2.state.hand.length > 0 && p2.state.status === 'playing');
 }
@@ -1791,7 +1794,7 @@ const injected: string[] = [];
       && line.includes('值夜的更夫') && line.includes('最后一次出牌'));
     t('候选说明按脾气分段可辨', line.includes('靠脑子'));
   }
-  t('池子够大（rep=4 时全员可进候选）', draftPool(4).length === PATRONS.length);
+  t('基础签名宾池包含全部基础客人，经营新客不污染旧种子', draftPool(4).length === PATRONS.filter(p=>!p.clubOnly).length);
 }
 
 // ── 14. 新手引导：表要自洽，而且**看不看教程必须不影响牌局** ──────
@@ -3327,6 +3330,8 @@ const { runReliability } = await import('../tools/reliability.mjs');
 runReliability(t);
 const { runExpansion } = await import('../tools/expansion-check.mjs');
 runExpansion(t);
+const { runClubChecks } = await import('../tools/club-check.mjs');
+runClubChecks(t);
 
 console.log(`正向 ${pass} 条通过，失败 ${fails.length} 条`);
 if (fails.length) {

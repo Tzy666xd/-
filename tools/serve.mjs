@@ -4,13 +4,16 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../web/', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../web/', import.meta.url));
 const port = Number(process.argv[2] ?? 8617);
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 createServer(async (req, res) => {
-  let path = decodeURIComponent((req.url ?? '/').split('?')[0]);
+  let path;
+  try { path = decodeURIComponent((req.url ?? '/').split('?')[0]); }
+  catch { res.writeHead(400);res.end('Bad URI');return; }
   if (path === '/') path = '/index.html';
   const target = join(root, normalize(path).replace(/^(\.\.[/\\])+/, ''));
   try {

@@ -5,6 +5,7 @@ import {
   Game, play, discard, buy, reroll, setRaise, useConsumable, sellSeat, settle, continueEndless,
   limits, targetOf, seatedCount, totalCards, MAX_DECK, reorderSeat, fishDiscard, peekDiscard,
   chooseEvent, autoResolveEvent,
+  acceptCommission, skipCommission, claimCommission, chooseStory, storyChapter,
 } from './game.ts';
 import type { GameState } from './game.ts';
 import { evaluate } from './hands.ts';
@@ -16,6 +17,7 @@ import { STEPS as TUT_STEPS, markSeen, STEP_IDS } from './tutorial.ts';
 import { LESSONS as GUIDE_LESSONS, LESSON_IDS, MARKER as GUIDE_ON, beginGuide, inGuide, markLesson } from './guide.ts';
 import type { FeatureFlags } from './flags.ts';
 import type { Card } from './hands.ts';
+import { validClub } from './club.ts';
 
 const RUNS = Number(process.argv[2] ?? 60);
 const STEPS = 4000;
@@ -55,6 +57,7 @@ const finite = (n: number): boolean => Number.isFinite(n);
 function check(s: GameState, ctx: string): void {
   const lim = limits(s);
   const bad = (name: string, cond: boolean): void => { if (!cond) rep.worst.push(`${name} — ${ctx}`); };
+  bad('委托与故事状态合法',!s.flags.club||validClub(s.club));
 
   bad('银钱为负或非法', finite(s.money) && s.money >= 0);
   bad('手牌超过上限', s.hand.length <= lim.handSize);
@@ -69,6 +72,7 @@ function check(s: GameState, ctx: string): void {
   bad('决策记录无限增长', s.decisions.length <= 120);
   bad('彩头非正', targetOf(s) > 0 && finite(targetOf(s)));
   bad('出牌次数为负', s.handsLeft >= 0);
+  bad('出牌机会用尽仍在进行中',s.status!=='playing'||s.handsLeft>0);
   bad('弃牌次数为负', s.discardsLeft >= 0);
   bad('随身超槽', s.consumables.length <= lim.slots);
   bad('座位超员', seatedCount(s) <= lim.seats);
@@ -113,6 +117,20 @@ function snapshotFor(g: Game): string {
 /** 完全不留情的随机策略：什么都按，专挑破坏性动作 */
 function randomAct(g: Game): string {
   const s = g.state;
+  if(s.status==='cleared'){g.openShop();return 'cleared';}
+  if(s.status==='playing'&&s.pendingEvent.length){
+    if(rnd()<.5)autoResolveEvent(g);else chooseEvent(g,pick(s.pendingEvent));
+    return 'event';
+  }
+  if(s.flags.club&&s.club){
+    if(s.club.contract?.status==='ready'){claimCommission(g,'cash');return 'contract-reward';}
+    if(s.club.offer.length){if(rnd()<.8)acceptCommission(g,pick(s.club.offer));else skipCommission(g);return 'contract-offer';}
+    const chapter=storyChapter(s);
+    if(chapter){
+      const choices=chapter.choices.filter(c=>c.ops.reduce((a,o)=>a+(o.t==='money'&&o.n<0?-o.n:0),0)<=s.money&&c.ops.every(o=>o.t!=='addCard'||totalCards(s)+o.cards.length<=MAX_DECK));
+      if(choices.length){chooseStory(g,pick(choices).id);return 'story';}
+    }
+  }
   if (s.status === 'shop') {
     const r = rnd();
     if (r < 0.45) { const i = Math.floor(rnd() * s.shop.length); buy(g, i); return 'buy'; }
@@ -147,14 +165,6 @@ function randomAct(g: Game): string {
     return 'leave';
   }
   if (s.status !== 'playing') return 'idle';
-  if (s.pendingEvent.length) {
-    // 待决期间内核拒绝出牌也拒绝弃牌（这是设计），所以跑局器必须**替玩家应一件事**——
-    // 不然整局原地空转，"不变量全过"是刷出来的（2026-10-12 就这么假绿过一次）。
-    // 一半走自决、一半随机点一张：两条路都要被走过。
-    if (rnd() < 0.5) autoResolveEvent(g);
-    else chooseEvent(g, s.pendingEvent[Math.floor(rnd() * s.pendingEvent.length)]);
-    return 'event';
-  }
   const r = rnd();
   const n = 1 + Math.floor(rnd() * 6);          // 故意试过选 6 张
   s.chosen = s.hand.slice(0, n).map((c: Card) => c.id);
@@ -265,7 +275,7 @@ for (let i = 0; i < RUNS; i++) {
 function continueEndlessProbe(g: Game): void {
   // 终局之后必须还能继续经营，且第 9 夜起彩头按指数走
   const before = g.state.status;
-  g.state.status = 'cleared';
+  g.state.status = 'won';
   continueEndless(g);
   check(g.state, `无尽开场 status=${before}→${g.state.status}`);
   if (g.state.night !== 9) rep.worst.push(`无尽没有推进到第 9 夜而是 ${g.state.night}`);
@@ -299,7 +309,7 @@ function continueEndlessProbe(g: Game): void {
 if (rep.onRuns * 2 < rep.runs) {
   rep.worst.push(`只有 ${rep.onRuns}/${rep.runs} 局开了新功能，七条路覆盖不到`);
 }
-for (const k of ['reorder', 'fish', 'peek', 'guide', 'guide-on', 'event']) {
+for (const k of ['reorder', 'fish', 'peek', 'guide', 'guide-on', 'event', 'contract-reward','contract-offer','story']) {
   if (!(seen.get(k) ?? 0)) rep.worst.push(`动作 ${k} 一次都没发生（新功能的入口没被走到）`);
 }
 

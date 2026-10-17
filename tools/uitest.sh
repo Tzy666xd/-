@@ -68,18 +68,19 @@ stopped=0
 # 只有"花了多少毫秒"这一类在代打下会被显式记成「未评」而不是假装通过。
 run() {
   local label="$1" boot="$2" query="$3" extra="${4:-}"
+  local script="${5:-$JS}"
   if [[ "$STOP_FAIL" == "1" ]]; then query="$query&failfast=1"; fi
   local out
   if ! mode_wanted "$label"; then return 0; fi
   ran=$((ran + 1))
   if [[ "$STOP_FAIL" == "1" && "$stopped" == "1" ]]; then return 0; fi
   # shellcheck disable=SC2086
-  out=$("$BIN" --uitest "$JS" --boot "$boot" --query "$query" --delay 300 --window 1400x860 $extra 2>/tmp/uitest.err)
+  out=$("$BIN" --uitest "$script" --boot "$boot" --query "$query" --delay 300 --window 1400x860 $extra 2>/tmp/uitest.err)
   local code=$?
   if [[ $code -ne 0 && "$query" == *seed* && "$out" =~ (-1ms|卡在|没给出裁决|疑似时钟节流) ]]; then
     echo "  retry $label —— 像是动画时钟停摆或被节流，改代打时钟复跑"
     # shellcheck disable=SC2086
-    out=$("$BIN" --uitest "$JS" --boot "$boot" --query "$query&vclock=1" --delay 300 --window 1400x860 $extra 2>/tmp/uitest.err)
+    out=$("$BIN" --uitest "$script" --boot "$boot" --query "$query&vclock=1" --delay 300 --window 1400x860 $extra 2>/tmp/uitest.err)
     code=$?
     [[ $code -eq 0 ]] && echo "        （复跑结论，走的是测试代打时钟：级联与状态机算验过，耗时按「未评」记）"
   fi
@@ -145,6 +146,10 @@ const g=new Game(4242);g.state.chosen=[g.state.hand[0].id];play(g);g.state.statu
 process.stdout.write(JSON.stringify(makeReport(g.state,false,"2026-10-15")));')
 run '战报重启回读' "localStorage.clear(); localStorage.setItem('$KEYS_PREFS','{\"guide\":true}'); localStorage.setItem('guinea.last-report.v1','$REPORT_FIXTURE');" 'uitest=shareboot'
 run '损坏战报' "localStorage.clear(); localStorage.setItem('$KEYS_PREFS','{\"guide\":true}'); localStorage.setItem('guinea.last-report.v1','{\"v\":1}');" 'uitest=sharebad'
+run '经营奇遇' "$BOOT_EMPTY" '' "--export-dir $EXPORT_OUT" 'tools/club-uitest.js'
+run '跨局败局回调' "$BOOT_EMPTY" 'snap=1&regression=loss' '' 'tools/club-regression-ui.js'
+run '跨局幕卡回调' "$BOOT_EMPTY" 'snap=1&curtain=hold&regression=curtain' '' 'tools/club-regression-ui.js'
+run '事件耗尽牌权' "$BOOT_EMPTY" 'snap=1&regression=events' '' 'tools/club-regression-ui.js'
 run '分享与稀奇牌' "$BOOT_EMPTY" 'uitest=share&snap=1' "--export-dir $EXPORT_OUT"
 run '查阅与复盘' "$BOOT_EMPTY" 'uitest=reference&snap=1'
 run '可靠性回归' "$BOOT_EMPTY" 'uitest=reliable&snap=1'
